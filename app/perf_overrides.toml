@@ -1,0 +1,64 @@
+# Code generation options for speed: the "optimised codegen" flavour.
+#
+# `tools\codegen.ps1 -Flavor optimised` copies this file to codegen_flavor.toml, which fc3_manifest.toml includes.
+# `-Flavor classic` (the default, and what every build so far used) writes an empty one. These are build-time
+# options, so they come as an A/B pair of NROs (docs/enhancements.md, "Build-time").
+#
+# WHAT THIS IS FOR: these options only change how the translated C++ is written, so the compiler can keep guest
+# state in host registers instead of reloading and storing it around every instruction. The guest-visible result is
+# the same. They matter a lot on the Switch: the A57 has a 48 KB instruction cache and a small TLB, and every
+# `ctx.r14` load and store is a memory access the recompiled code would not have needed.
+#
+# NOT YET ENABLED, and why: they are all safe only after the guest's own code has been audited for the things they
+# assume (the reads-before-writes sweep, the ctx.lr readers, the setjmp path). Far Cry 3 has not booted yet, so none
+# of that has been done for it. Turning them on before the game runs correctly would make a broken port harder to
+# diagnose. The list below is the set inherited from the other ports, kept ready.
+#
+#   cr_as_local / ctr_as_local / xer_as_local / reserved_as_local
+#       cr0-cr7, the count register, the fixed-point exception register and the lwarx reservation become C++
+#       locals instead of fields of the context struct. UnleashedRecomp-NX and MarathonRecomp-NX ship the same set.
+#   skip_msr
+#       No mfmsr/mtmsrd fences, no ctx.msr stores and no global lock around the guest atomic sequences. A stwcx. is
+#       already a compare-and-swap. masseffect-nx measured skip_msr + reserved_as_local at -3.4 % total CPU.
+#   dform_disp_split
+#       D-form loads and stores as base + zext(reg) + disp. Differs only when reg + disp crosses 2^32, which is a
+#       guest fault either way.
+#   fctiwz_inline
+#       fctiwz as fcvtzs plus a NaN select.
+#   non_volatile_as_local
+#       r14-r31, f14-f31 and v14-v31/v64-v127 become C++ locals, so the __savegprlr/__restgprlr helper calls and the
+#       guest-stack traffic for those registers disappear. This was the single largest codegen win in the other
+#       ports (SASRT: 669,839 ctx.r14-r31 uses down to 1,586; 158,515 ctx.lr stores down to 0).
+#   elide_lr_stores
+#       Drops `ctx.lr = <return address>` before every call. Requires a tools\read_before_write.py sweep first:
+#       anything that reads a register its caller left behind breaks.
+#   fp_moves_modeless
+#       lfd/stfd, stfiwx, fmr, fabs, fnabs and fneg only move bits, so they no longer switch the FPU's flush mode.
+#       On the A57 every switch is an `msr fpcr`; in one profile of another port, 20-26 % of a thread's samples sat
+#       right after one.
+#   non_argument_as_local
+#       r0, r2, r11, r12, f0 and v32-v63 as locals (MSVC uses r11/r12/f0 as scratch everywhere).
+#   non_argument_as_local_keep
+#       The addresses that must keep them in ctx: the __save*/__rest* helpers, the MSVC EH/SEH funclets, the stack
+#       probe and the C++ EH dispatch (_CallSettingFrame, the `mr r12,r5; bctr` continuation jumps). EMPTY HERE ON
+#       PURPOSE: the list belongs to whichever build last measured it, and Far Cry 3 has none of those addresses yet.
+#       tools\direct_calls.py treats every address in this file as hooked, so a stale entry would corrupt calls.
+#       Fill it from a real build: generate the code without the option and read tools\non_argument_audit.py, which
+#       names every function that crosses a call in one of those registers.
+#
+# Post-codegen steps that come with this flavour (tools\codegen.ps1): tools\pch_no_volatile.py (guest memory without
+# volatile; masseffect-nx: +15-20 % fps) and tools\direct_calls.py (calls between unhooked functions become direct
+# calls, so GCC can inline them across files with LTO).
+cr_as_local = true
+ctr_as_local = true
+xer_as_local = true
+reserved_as_local = true
+skip_msr = true
+dform_disp_split = true
+fctiwz_inline = true
+non_volatile_as_local = true
+elide_lr_stores = true
+fp_moves_modeless = true
+non_argument_as_local = true
+# Far Cry 3: empty until tools\non_argument_audit.py runs on this game's generated code.
+non_argument_as_local_keep = []

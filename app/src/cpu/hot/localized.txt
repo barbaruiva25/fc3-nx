@@ -1,0 +1,23 @@
+# Guest functions replaced by localized copies (tools/localize_native.py), regenerated into app/generated/hot/ by
+# tools/codegen.ps1 after every codegen, so each copy matches the flavour it is built with. One per line:
+# <address> <what>
+#
+# Empty by default: these addresses belong to the game they were measured on, and Far Cry 3 has none of them yet.
+#
+# How to fill it, once the game runs on the console (guia, capitulo 9.3):
+#   1. Profile on the console (sdk/src/ui/switch_perf.cpp writes logs/rex/rex_profile.log), then
+#      tools/switch_profile_report.py and tools/cpu_profile_report.py give the hottest functions by address.
+#   2. Copy the hottest leaf functions here. functions/localize_native.py regenerates each one's translated code
+#      with its registers as C++ locals, which is exact by construction: it is the same code.
+#   3. Nothing goes in here without its address and its profile share; a function not in this file still runs the
+#      original, so a wrong entry costs speed, not correctness.
+#
+# Useful candidates by role (what to look for in the profile), for reference when Far Cry 3 has its own:
+#   matrix / vector math      matrix x point, matrix product, translation, rotation
+#   vertex / chunk loaders    vertex buffers copied in and transformed per frame
+#   memcpy / memset           replaced by host versions (NEON on the Switch)
+#   Direct3D draw path        only once the renderer hooks of src/me match this game's XDK build
+#
+# A function that makes calls can also be listed, but then it runs unguarded (the guard cannot call both versions
+# without the callee's side effects happening twice); leaves are guarded and compared against the original while the
+# game runs. See app/src/cpu/fc3_hot_guest.cpp.

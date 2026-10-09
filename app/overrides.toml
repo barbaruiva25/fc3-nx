@@ -1,0 +1,59 @@
+# Far Cry 3 (Xbox 360) - analysis corrections for the code generator.
+#
+# Empty on purpose. Every entry below belongs to Far Cry 3 alone and needs its evidence (which tool or which log
+# found it), so nothing may be copied from another game's manifest.
+#
+# The tools that produce candidates:
+#   tools/find_gaps.py, tools/gap_fixpoint.py   code the automatic discovery left without a function
+#   tools/pointer_scan.py                       code pointers stored in data (vtables, callback tables)
+#   tools/pointer_audit.py, tools/pointer_fixpoint.py   pointers reached only through a pointer
+#   tools/switch_check.py                       truncated jump tables (`switch` statements)
+#   tools/runtime_gap_resolver.py               "Call to invalid or unregistered function" from a game log
+#
+# Root keys that will be needed here (address and evidence, once the game has booted once):
+#   setjmp_address / longjmp_address    the CRT's setjmp and longjmp; without them r1/r31 come back corrupted
+#                                       after a call that returns through longjmp
+#
+# Known shapes to look for, from the guide (chapter 3.2):
+#   - functions reached only through pointers (CRT initializer tables, vtables, callbacks built with lis/addi)
+#   - truncated jump tables ("Switch case out of range" / illegal instruction)
+#   - gaps: code that exists in the XEX but no static path reaches
+#   - functions that never return (abort, C++ throw): without read_before_write the translator merges the catch
+#     funclet into its parent and falls through into foreign code
+
+[functions]
+# First validation run (rexglue codegen, 2026-10-09): a direct unconditional branch (`b`, a tail call) to each
+# address below, which automatic discovery had not assigned to any function ("target not in any function"). The
+# evidence is the generator's own Validate phase, out/codegen.log: "UnresolvedCall (20)". No sizes imposed: the
+# Discover phase determines each boundary from the PPC code.
+#
+# 20 errors over 17 distinct targets (0x82BF6358 is branched to twice, 0x82A029C0 three times).
+"0x823FAB70" = { }  # from 0x823FF5A8
+"0x824572B8" = { }  # from 0x82458D7C
+"0x82A029C0" = { }  # from 0x828F062C (x3)
+"0x82AC14E0" = { }  # from 0x832D3B5C
+"0x82BF6358" = { }  # from 0x82BF63E8, 0x82BF6408
+"0x82BF6CD8" = { }  # from 0x82AE1458
+"0x82E4CD30" = { }  # from 0x83044B8C
+"0x83772748" = { }  # from 0x83806BC4
+"0x8378FC88" = { }  # from 0x83772B38
+"0x837B37D8" = { }  # from 0x837727E8
+"0x837B3848" = { }  # from 0x837727B0
+"0x837B3858" = { }  # from 0x83772778. Only one left after the first pass added the 17 above (second run,
+                    # out/codegen.log: "UnresolvedCall (1)" after 1668 s): registering 0x837B3848 changed what
+                    # the branch scan reaches next to it, so this neighbour of the same table appeared.
+
+# A gap inside sub_83493B70: eighteen branches to 0x83494044 / 0x83494048 (its own code, fc3_recomp.326.cpp) whose
+# block the Discover phase cut. codegen.partition.json puts the address under sub_83493D58, which discovery never
+# made a function, so the generator wrote the gotos and not the labels:
+#   error: use of undeclared label 'loc_83494048'
+# Declaring sub_83493D58 here gives that block a home of its own. tools/fix_missing_labels.py --check must report
+# nothing afterwards; if it does, the remaining missing labels are targets with no code at all, which is a
+# different problem.
+"0x83493D58" = { end = 0x83494068 }
+"0x837B3C08" = { }  # from 0x837C07F8
+"0x837C26C0" = { }  # from 0x837872D0
+"0x837DDC90" = { }  # from 0x837B3C20
+"0x837DDCA0" = { }  # from 0x837B3C30
+"0x837DDCF8" = { }  # from 0x837B3C04
+"0x83A268A0" = { }  # from 0x83A46038

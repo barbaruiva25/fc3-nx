@@ -1,0 +1,2 @@
+# classic codegen: no extra options (tools\codegen.ps1 -Flavor classic writes this file; -Flavor optimised
+# copies perf_overrides.toml here). Included by fc3_manifest.toml.

@@ -1,0 +1,34 @@
+# ReXGlue recompilation manifest for Far Cry 3 (Xbox 360 retail disc, title 5553088C, default.xex).
+#
+# Run tools/codegen.ps1 (Windows). The project name sets the prefix of everything generated:
+# generated/default/fc3_{init,pch,funcs}.h, fc3_recomp.N.cpp, and the CMake target fc3_recomp
+# built by CMakeLists.txt.
+#
+# default.xex: image base 0x82000000, entry point 0x82342D50, image size 33,947,648 bytes (0x02060000),
+# XEX version 0.0.0.2, media id 6F6EAD36, AES-128 + LZX.
+
+[project]
+name = "fc3"
+sdk_version = "0.10.0"
+# Your own game files: the extracted disc (assets/game_root, made by tools/extract_iso.py), with default.xex
+# at its root. Nothing from the game is distributed with this project.
+game_root = "../../assets/game_root"
+
+[entrypoint]
+file_path = "../../assets/game_root/default.xex"
+out_directory_path = "generated/default"
+
+# The includes are processed before this table, so whatever is set here overrides what is included.
+#   overrides.toml       written by hand: code the automatic function discovery misses, each with its evidence
+#   codegen_flavor.toml  the codegen flavour, written by tools\codegen.ps1 -Flavor: empty for "classic", a copy of
+#                        perf_overrides.toml (code generation options for speed) for "optimised"
+includes = ["overrides.toml", "codegen_flavor.toml"]
+
+# Modules are added here as they are found: a guest DLL loaded with XexLoadImage needs its own [[modules]] entry.
+# Candidates in this game's data (checked with tools/rel_info.py over ige.dat, startup.dat and common.dat):
+#   - ige.dat (39 MB): Ubisoft's internal engine code. A .fat/.dat pair like the world's, so the code is inside a
+#     container, not a plain XEX: whether the game XexLoadImage's it is one of the first things the boot log must
+#     answer ("Call to invalid or unregistered function" at a guest address outside default.xex's range).
+#   - UplayBrowser.xex (5 MB): the Uplay overlay, a separate title's executable. It is not the game and is not
+#     loaded by default.xex; it is only here as a note.
+# Nothing is listed yet: the first codegen run below is what tells us which module the game actually loads.
