@@ -47,9 +47,19 @@
 # block the Discover phase cut. codegen.partition.json puts the address under sub_83493D58, which discovery never
 # made a function, so the generator wrote the gotos and not the labels:
 #   error: use of undeclared label 'loc_83494048'
-# Declaring sub_83493D58 here gives that block a home of its own. tools/fix_missing_labels.py --check must report
-# nothing afterwards; if it does, the remaining missing labels are targets with no code at all, which is a
-# different problem.
+#
+# Declaring sub_83493D58 here did NOT work (tried: bare, with parent = 0x83493B70, with end = 0x83494068; each
+# codegen run leaves it out of the tree). The likely reason is phase_discover.cpp:175, which drops a branch whose
+# target falls inside the function's own PDATA region: the PDATA the Xbox has for sub_83493B70 extends past
+# 0x83494044, so the branch is discarded as "internal" and nothing ever reaches the function that owns that code.
+#
+# The two entries below are that test, not a known fix: giving sub_83493B70 an `end` before the branch target takes
+# the target out of the PDATA region, so the branch is no longer skipped and discovery can reach the code. If it
+# works, sub_83493D58 appears on its own and this second entry can go.
+#
+#   tools/fix_missing_labels.py must report "nothing missing" afterwards. If it still reports the two labels, this
+#   approach failed and the fix belongs in the SDK (docs/NOTAS-DE-BUILD.md, section 9).
+"0x83493B70" = { end = 0x83493D58 }
 "0x83493D58" = { end = 0x83494068 }
 "0x837B3C08" = { }  # from 0x837C07F8
 "0x837C26C0" = { }  # from 0x837872D0
