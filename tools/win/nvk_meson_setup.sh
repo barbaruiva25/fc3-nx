@@ -33,8 +33,7 @@ python -m mesonbuild.mesonmain setup "$BUILD" . \
     --prefix "$PREFIX" \
     --libdir 'opt/devkitpro/portlibs/switch' \
     -Dplatforms=switch \
-    -Dgallium-drivers=softpipe \
-    -Dvulkan-drivers=nvk \
+    -Dgallium-drivers=nouveau \
     -Dbuild-tests=false \
     -Dllvm=disabled \
     -Db_lto=false \
