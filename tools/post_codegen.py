@@ -47,6 +47,18 @@ def main():
             run(os.path.join(ROOT, 'tools', 'direct_calls.py'), '--redo', '--gen', os.path.join(GEN, tree))
     run(os.path.join(ROOT, 'tools', 'localize_native.py'), '--list',
         os.path.join(APP, 'src', 'cpu', 'hot', 'localized.txt'))
+    # Cross-file jumps: the generator splits the translated functions across ~438 .cpp files. A `b` that lands inside
+    # another function's body (a shared epilogue is the common case) becomes a `goto` with no label to bind to, and
+    # clang fails with "use of undeclared label". Two steps, in this order: wrap the target block in a function in the
+    # file that owns it, then turn each branch site into a call to it. Both are idempotent and only touch what is
+    # broken; the guest instructions themselves are not modified.
+    for tree in ('default', 'data_dll'):
+        if not os.path.isdir(os.path.join(GEN, tree)):
+            continue
+        run(os.path.join(ROOT, 'tools', 'fix_cross_file_labels.py'), '--gen', os.path.join(GEN, tree))
+        run(os.path.join(ROOT, 'tools', 'fix_cross_file_branch_sites.py'), '--gen', os.path.join(GEN, tree))
+        run(os.path.join(ROOT, 'tools', 'lift_label_wrappers.py'), '--gen', os.path.join(GEN, tree))
+        run(os.path.join(ROOT, 'tools', 'fix_cross_file_branch_calls.py'), '--gen', os.path.join(GEN, tree))
     # Round 7: the options added since round 6 are named too, so a console log tells the builds apart.
     extras = [name for key, name in (('non_volatile_as_local', 'non-volatile locals'), ('elide_lr_stores', 'no lr stores'),
                                      ('fp_moves_modeless', 'modeless fp moves'),

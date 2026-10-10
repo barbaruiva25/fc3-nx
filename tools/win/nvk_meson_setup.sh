@@ -32,6 +32,9 @@ python -m mesonbuild.mesonmain setup "$BUILD" . \
     --cross-file switch_cross_file.txt \
     --prefix "$PREFIX" \
     --libdir 'opt/devkitpro/portlibs/switch' \
+    -Dplatforms=switch \
+    -Dgallium-drivers=softpipe \
+    -Dvulkan-drivers=nvk \
     -Dbuild-tests=false \
     -Dllvm=disabled \
     -Db_lto=false \

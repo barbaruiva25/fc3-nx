@@ -61,6 +61,15 @@
 #   approach failed and the fix belongs in the SDK (docs/NOTAS-DE-BUILD.md, section 9).
 "0x83493B70" = { end = 0x83493D58 }
 "0x83493D58" = { end = 0x83494068 }
+
+# The first boot (out\pc\logs\fc3_001.log, 2026-10-09) got as far as mounting the game files, building the function
+# table (code 82340000-83DF2AF4) and creating the shader storage, then stopped:
+#   [FATAL] Unresolved call from 0x8362B300 to 0x8363CE50
+# The generator has reported this one since the first run ("Unresolved function 0x8363CE50 from 0x8362B300 (no
+# CallTarget in FunctionNode)") but its Validate phase did not count it as an error, so codegen completed anyway.
+# It is a direct branch (b) out of sub_8362B2C0's block into a gap; registering it here gives the code its own
+# function, which is what the branch needs.
+"0x8363CE50" = { }
 "0x837B3C08" = { }  # from 0x837C07F8
 "0x837C26C0" = { }  # from 0x837872D0
 "0x837DDC90" = { }  # from 0x837B3C20

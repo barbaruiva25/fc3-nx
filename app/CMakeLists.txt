@@ -37,7 +37,8 @@ endif()
 set(fc3_SOURCES
     src/main.cpp
     # Stage 2, phase A: wraps the game's Direct3D candidates and logs them (cvar fc3_d3d_trace, off by default).
-    src/fc3_d3d_trace.cpp
+    # fc3_d3d_trace.cpp wraps the game's Direct3D candidates by address (stage 2 census tool), so it
+    # goes with the renderer.
     # Video recordings of the game image for testing (cvar fc3_video_s; tools/make_video.sh makes the MP4).
     src/fc3_capture.cpp
     # DLC: installs the content packages in dlc/ next to the executable (cvar fc3_dlc_dir).
@@ -52,33 +53,51 @@ set(fc3_SOURCES
     src/fc3_debug_hooks.cpp
     # Stage 2: the native renderer (src/me, masseffect-nx's PM4-ring Vulkan renderer as adapted by banjo-nx). It
     # replaces the emulated Xenos GPU with fc3_renderer_native = true; off by default until it draws fc3 right.
-    src/me/me_native_system.cpp
-    src/me/me_ring_wait.cpp
-    src/me/me_renderdoc.cpp
-    src/me/native/fc3_native_draws.cpp
-    src/me/native/fc3_deferred_recording.cpp
-    src/me/native/fc3_native_targets.cpp
-    src/me/native/fc3_native_shaders.cpp
-    src/me/native/fc3_native_textures_pool.cpp
     src/me/native/fc3_shader_library.cpp
-    src/me/native/fc3_native_glue.cpp
     # fc3's D3D addresses (draw-time shader load, Draw*) and the shader container dump (fc3_dump_shaders).
-    src/me/fc3_me_hooks.cpp
-    src/me/fc3_d3d_api.cpp
     # The native Direct3D layer (docs/api-renderer.md): Direct3D entry points as native code writing the ring's records.
-    src/me/fc3_api_draw.cpp
-    src/me/fc3_api_clear.cpp
-    src/me/fc3_api_resolve.cpp
     # Render resolution per console mode (docked / handheld, live) and MSAA: fc3_render_height_*, fc3_msaa.
     src/me/fc3_render_mode.cpp
     # Switchable enhancements (docs/enhancements.md): masters fc3_cpu_enhancements / fc3_noncpu_enhancements, one key
     # each, a startup line and a 10 s use report.
     src/cpu/fc3_enhancements.cpp
-    src/cpu/fc3_gpu_wait.cpp
+    # fc3_gpu_wait.cpp hooks the game's Direct3D wait by address (sub_8254F400 and friends). Those are
+    # sa2-nx addresses with no Far Cry 3 counterpart, so it belongs with the renderer (stage 2/4).
     src/cpu/fc3_gpu_boost.cpp
     # Native replacements of hot guest functions (src/cpu/hot), each with a self-check guard and its own key.
     src/cpu/fc3_hot_guest.cpp
 )
+# The native renderer (src/me) is stage 2. It is built only when fc3_BUILD_NATIVE_RENDERER is ON, which it must not be
+# until its addresses are this game's: src/me/fc3_me_hooks.cpp, fc3_api_*.cpp and fc3_d3d_api.cpp hook guest
+# functions by address, and the ones inherited from sa2-nx (0x8254D340, 0x82555930, 0x825645A0, 0x82565C18,
+# 0x828EAF69 and twelve more, all in the 0x8254xxxx-0x8256xxxx range) do not exist in Far Cry 3's default.xex. With
+# them in the build the PC link fails with 16 undefined symbols, and nothing in stage 1 needs them: with
+# fc3_renderer_native = false the app draws with ReXGlue's emulated Xenos GPU and never calls into src/me.
+option(fc3_BUILD_NATIVE_RENDERER "Build the native Vulkan renderer (stage 2)" OFF)
+if(fc3_BUILD_NATIVE_RENDERER)
+    list(APPEND fc3_SOURCES
+        src/me/me_native_system.cpp
+        src/me/me_ring_wait.cpp
+        src/me/me_renderdoc.cpp
+        src/me/native/fc3_native_draws.cpp
+        src/me/native/fc3_deferred_recording.cpp
+        src/me/native/fc3_native_targets.cpp
+        src/me/native/fc3_native_shaders.cpp
+        src/me/native/fc3_native_textures_pool.cpp
+        src/me/native/fc3_native_glue.cpp
+        src/me/fc3_shader_library.cpp
+        src/me/fc3_me_hooks.cpp
+        src/me/fc3_d3d_api.cpp
+        src/me/fc3_api_draw.cpp
+        src/me/fc3_api_clear.cpp
+        src/me/fc3_api_resolve.cpp
+        # The game's Direct3D GPU wait sleeping instead of spinning (fc3_cpu_gpu_wait_sleep): it hooks the wait by
+        # address (sub_8254F400 and friends), so it needs the ring thread it waits on.
+        src/cpu/fc3_gpu_wait.cpp
+        # Wraps the game's Direct3D candidates and logs them (cvar fc3_d3d_trace), by address as well.
+        src/fc3_d3d_trace.cpp
+    )
+endif()
 # Diagnostic builds only (e.g. the Direct3D census: out/census/fc3_d3d_census_all.cpp): extra sources, empty by default.
 set(fc3_EXTRA_SOURCES "" CACHE STRING "Extra source files for diagnostic builds (empty for normal builds)")
 if(fc3_EXTRA_SOURCES)
