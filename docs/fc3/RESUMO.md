@@ -1,37 +1,82 @@
 # Far Cry 3 (Xbox 360) -> Nintendo Switch — estado da Etapa 1
 
-Data: 2026-10-09. Projeto em `fc3-nx/`, dados do jogo em `assets/`.
+Data: 2026-10-10. Projeto em `fc3-nx/`, dados do jogo em `assets/`.
 
 ## Onde esta
 
-**Etapa 1 (recompilar e bootar no PC): o jogo compila e faz o boot. O loop de boot esta em andamento.**
+**Etapa 1 (recompilar e bootar no PC): o crash de memoria foi resolvido. O bloqueio agora e um arquivo
+faltando no conteudo do jogo.**
 
 | Etapa | Estado |
 |---|---|
 | Extrair o jogo | **feito** (5,77 GB, 103 arquivos) |
 | Traduzir o codigo do convidado | **feito** (883 funcoes, 469 MB de C++) |
-| Compilar o PC | **feito** (`fc3.exe`, 162 MB) |
-| Bootar no PC | **em andamento**: carrega o jogo, para num campo de sistema ainda zerado |
+| Compilar o PC | **feito** (`fc3.exe`, 170 MB) |
+| Ambiente de build | **montado** (VS Build Tools, clang 23.1.3, Python 3.13, devkitA64 16.1.0 + libnx) |
+| Bootar no PC | **em andamento**: passa do crash `0x13C`, monta timer/interrupto, para em `update:\patch.dat` |
 | Etapa 2 (renderer nativo Vulkan) | nao comecada |
-| Etapa 3 (NRO para o Switch) | NVK em compilacao; NRO nao comecado |
+| Etapa 3 (NRO para o Switch) | CMake/toolchain-file/scripts **prontos**; **nunca compilado** (`out/nx` nao existe). Depende do `libvulkan.a` do NVK, cujo build ainda falha |
 | Etapa 4 (desempenho) | nao comecada |
+
+### Ambiente resolvido (2026-10-10, 23:00)
+
+A maquina nao tinha toolchain nenhuma.Instalado e verificado:
+
+| | |
+|---|---|
+| VS 2022 Build Tools (C++ x64) | `C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools` |
+| LLVM | `C:\Program Files\LLVM` — clang 23.1.3 |
+| Python | `C:\Users\barba\AppData\Local\Programs\Python\Python313` (3.13.15) |
+| CMake + Ninja | os do proprio VS Build Tools (3.31.6 / 1.12.1) |
+| devkitA64 + libnx | `C:\devkitPro` (junction para `C:\msys64\opt\devkitpro`), GCC 16.1.0, libnx 4.12.0 |
+
+O `MSYS2.MSYS2` do winget instala com `0xC0000135` nesta maquina; o `msys2-base-*.tar.xz` do GitHub
+funciona e foi ele que foi usado. O repositorio do devkitPro precisa da chave
+`BC26F752D25B92CE272E0F44F7FD5492264BB9D0` e tambem da `62C7609ADA219C60` (que o `pacman` pede para o
+`switch-dev`), e o gpg do MSYS2 **nao alcanca o keyserver** — baixe as chaves com o PowerShell e
+`pacman-key --add`. Detalhes em `NOTAS-DE-BUILD.md` §11.
+
+O junction `fc3-nx\assets` foi refeito (`cmd /c mklink /J fc3-nx\assets ..\assets`) e `out\pc` foi
+apagado e reconfigurado, porque o `CMakeCache.txt` apontava para o caminho antigo do projeto.
+
+### Duas armadilhas do build que custaram tempo
+
+1. **Apos rodar o codegen, o build para.** `cmake --build out\pc` roda o passo `Generating recompiled
+   code for fc3`, planeja os 443 passos restantes e sai com codigo 0 **sem compilar nada nem relinkar
+   `fc3.exe`**. Nao e erro: o ninja replaneja e para. A saida e `cmake --build` logo depois de rodar o
+   configure. Para ver o que ele quer fazer, `ninja -C out\pc -n -d explain`.
+2. **`tools\win\env.ps1` nao achava o Python.** O primeiro `python` no PATH e o alias da Microsoft
+   Store, que abre a loja em vez de rodar, e `post_codegen.py` falha sem traceback. O `env.ps1` agora
+   poem o interpretador real na frente do PATH.
+
+### build_nvk.ps1 e build_switch.ps1
+
+Os dois apontavam para o layout antigo do devkitPro (`<DEVKITPRO>\msys2\...`, que o instalador atual
+nao cria). Corrigidos para sondar `C:\msys64` tambem. O `make.exe` que o LTO precisa nao vem no MSYS2
+base — e o pacote `make` do pacman.
 
 ## O boot, ate onde chega
 
-`out/pc/logs/fc3_002.log` (2026-10-10):
+`out/pc/logs/fc3_006.log` (2026-10-10 23:25), depois da correcao do crash `0x13C`:
 
 ```
 Function table initialized for module: code=82340000-83DF2AF4, image=82000000-84060000
 SDL input driver initialized successfully
 Initializing shader storage for title 5553088C...
-Unhandled guest access violation: read of guest 0x0000013C on thread 0xF8000060
-  (identico em 6 threads, mesmo PC)
+[gpu] SetInterruptCallback(8365B5A0, 4003E980)      <- timer/interrupto montado
+[error] [krnl] XamShowDirtyDiscErrorUI called!      <- e para aqui
 ```
 
-O crash esta em `sub_8237E408`, `fc3_recomp.347.cpp:319`, um `lwz r11,316(r28)` em que `r28` vale zero.
-`r28` vem de `lis r11,-31774` + `addi r28,r11,-24248` = `0x8237A148`, um endereco valido da imagem: o
-gerador esta certo, e o mesmo acesso passa nas linhas 256, 267 e 284 da mesma funcao. Entre 284 e 318 ha uma
-chamada indireta (`bctrl`), e e depois dela que `r28` aparece zerado.
+O crash de `0x13C` foi resolvido (ver `DIAGNOSTICO-BOOT-0x13C.md`). O bloqueio agora e
+`update:\patch.dat`: o jogo le esse arquivo no inicio da inicializacao de conteudo e chama
+`XamShowDirtyDiscErrorUI` quando ele falta. Ele existe no console (particao de update) mas **nao esta
+no ISO extraido** — nenhum dos 17 `.fat` de `assets/game_root` o lista.
+
+Montar o dispositivo resolve metade: com `REX_update_data_root=<pasta>` o log passa a dizer
+`mounted ... at \Device\Harddisk0\PartitionUpdate`, e o jogo ainda chama `XamShowDirtyDiscErrorUI`,
+porque o que ele quer e o arquivo.
+
+O crash antigo esta em `sub_8237E408`, `fc3_recomp.347.cpp:319`, um `lwz r11,316(r28)` em que `r28` vale zero.
 
 Seis threads leem exatamente `0x13C` no mesmo instante: nao e corruption de registrador, e um **campo global
 de sistema que o kernel do Xbox deveria ter escrito e nao escreveu** (o jogo le em varias threads logo apos a
@@ -42,35 +87,24 @@ sa2-nx: ou uma export de kernel que o SDK nao implementa (e que se declara em `a
 `setjmp`/`longjmp` faltando, ou uma funcao alcancada so por ponteiro. O guia, capitulo 3.2, lista as ferramentas
 (`tools/find_gaps.py`, `tools/pointer_audit.py`, `tools/switch_check.py`).
 
-### Suspeita mais especifica (verificada no codigo gerado)
+### Causa raiz (2026-10-10, ver `DIAGNOSTICO-BOOT-0x13C.md`)
 
-O caminho do crash tem uma anomalia de ABI:
+**Corrigido.** A suspeita de `sub_8362B1C0` abaixo estava errada e foi substituida pela analise completa.
 
-- `sub_8237E408` calcula `r28` de `lis r11,-31774` + `addi r28,r11,-24248` = `0x8237A148` (endereco valido da
-  imagem) e o usa em quatro leituras: `lwz r11,316(r28)` nas linhas 256, 267, 284 e 318.
-- As tres primeiras passam. A quarta crasha. Entre 284 e 318 ha uma chamada indireta (`bctrl`, linha 296) e
-  depois chamadas a `sub_8362B0E0`, `sub_8362B1C0`, `sub_8362B300`.
-- **`sub_8362B1C0` faz `mr r28,r4` e nunca salva `r28`** (nem no prologo, nem no epilogo). No PowerPC `r28` e
-  non-volatile (r14-r31): quem altera tem de salvar. As funcoes do Xbox compiladas com oCallingConvention do SDK
-  usam `__savegprlr_N` justamente para isso, e `sub_8362B1C0` usa `__savegprlr_27` — que salva r14..r27, nao r28.
+O que vale reter:
 
-Se essa leitura estiver certa, `r28` volta de `sub_8362B1C0` com o valor de `r4`, e `r28+316` cai fora da imagem:
-o que o log mostra (`guest 0x13C`) e consistente com `r28` pequeno.
+- `0x13C = 316`, e `316` e exatamente o displacement de `lwz r11,316(r28)`. Logo **`r28 = 0`**, e nao um
+  campo global nao inicializado.
+- O `r28` de origem e `0x83E1A148` (o `0x8237A148` deste arquivo tem os digitos trocados).
+- `r28` e destruido dentro do loop por `sub_8363CE50` (`fc3_recomp.325.cpp:28199`), que faz
+  `ld r28,264(r3)` sem prologo e termina em `b` para `__imp__KeSetCurrentStackPointers`.
+- A export `KeSetCurrentStackPointers` (`sdk/src/kernel/xboxkrnl/xboxkrnl_threading.cpp:270`) retorna ao
+  guest; no hardware ela nao retorna, porque o thread e despachado. O fluxo do guest continua num
+  ponto em que so faz sentido depois de um despacho, com `r28` valendo um campo de contexto de thread
+  que seis threads leem vazio no mesmo instante.
+- `sub_8237E408` esta **correto** quanto a ABI: `__savegprlr_27` salva `r27..r31`, nao `r14..r27`.
 
-Como verificar sem adivinhar: `tools/guest_code_hash.py` e o `register_visitor` do SDK. A pergunta objetiva e
-**"essa funcao deveria ter um `__savegprlr_28` (ou `_31`) no XEX e o gerador nao o reconheceu?"**. Duas respostas
-possiveis:
-
-- se o XEX tem o save e o gerador nao o detectou, e um caso de `[[functions]]` / assinatura faltando;
-- se o XEX nao tem, entao o compilador Xbox otimizoucg knowing que nenhum caller le r28 depois, e quem esta
-  errado e o **analise do codegen** (ou o `r28` do chamador e nao na verdade o mesmo registro, porque a chamada
-  passa o valor em outro).
-
-Como o codegen traduz `sub_8362B1C0` com `__savegprlr_27` (extraido da assinatura real do XEX), a segunda
-hipotese e mais provavel: `sub_8362B1C0` usa `r28` como local **e** o chamador depende dele, o que so compila se
-o Xbox soubesse de algo que o codegen nao sabe — tipicamente que `r4` (e portanto `r28`) ja tinha o valor certo,
-ou que o caller reatribui `r28` depois. `sub_8237E408` reatribui `r28` na linha 250, antes do loop, mas nao
-dentro dele.
+Leitura completa, com numeros de linha e as tres correcoes propostas: `DIAGNOSTICO-BOOT-0x13C.md`.
 
 ## O que ja da para dizer
 

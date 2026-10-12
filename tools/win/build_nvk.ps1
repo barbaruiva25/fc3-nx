@@ -23,7 +23,7 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools\win\build_nvk.ps1 [-Jobs 20] [-Reuse]
 param(
     # The mesa-switch checkout, already at the NVK commit.
-    [string]$Mesa = 'C:\Users\barba\Documents\xbox360\mesa-switch',
+    [string]$Mesa = '',
     # Parallel jobs inside meson (0 = every logical processor).
     [int]$Jobs = 0,
     # Reuse the existing build directory (skip meson setup).
@@ -34,7 +34,16 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $install = Join-Path $root 'mesa-switch-install'
 $builddir = Join-Path $root 'out\mesa'
 $log = Join-Path $root 'out\nvk_build.log'
-$bash = 'C:\devkitPro\msys2\usr\bin\bash.exe'
+
+# The checkout normally sits next to the repo, as ..\mesa-switch.
+if (-not $Mesa) { $Mesa = Join-Path $root '..\mesa-switch' }
+# devkitPro's current installer keeps MSYS2 in C:\msys64 and devkitPro under its opt\; the old standalone layout had
+# it at <DEVKITPRO>\msys2. Probe both.
+$bash = @(
+    (Join-Path $root '..\..\..\msys64\usr\bin\bash.exe'),
+    'C:\devkitPro\msys2\usr\bin\bash.exe',
+    'C:\msys64\usr\bin\bash.exe'
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
 
 if (-not (Test-Path (Join-Path $Mesa 'meson.build'))) { throw "$Mesa is not a mesa-switch checkout" }
 if (-not (Test-Path $bash)) { throw 'devkitPro MSYS2 not found' }
@@ -67,6 +76,27 @@ function RunBash([string]$script, [string[]]$scriptArgs, [string]$what) {
 
 Remove-Item $log -ErrorAction SilentlyContinue
 New-Item -ItemType File -Force $log | Out-Null
+
+# NVK's NAK compiler is Rust and the cross file points at mesa-switch/rustc-switch-wrapper.sh, which
+# needs to know which rustc to use and which target to build for. Use the rustup shim: the winget
+# Rust.GNU package ships only the host target's std, and without the aarch64-unknown-linux-gnu std the
+# NAK build fails with "can't find crate for `std`".
+$cargo = Join-Path $env:USERPROFILE '.cargo\bin'
+if (Test-Path (Join-Path $cargo 'rustc.exe')) {
+    $env:MESA_SWITCH_RUSTC = (Join-Path $cargo 'rustc.exe')
+    $env:PATH = "$cargo;$env:PATH"
+}
+$env:MESA_SWITCH_RUST_TARGET = 'aarch64-unknown-linux-gnu'
+
+# bindgen, for the NAK bindings. mesa-switch/bindgen-switch-wrapper.sh reads MESA_SWITCH_BINDGEN.
+# It must be bindgen-cli (>= 0.71.1), not cbindgen: meson.build:899 refuses anything older with
+# "Mesa requires bindgen 0.71.1 or newer". `cargo install` needs dlltool, which ships with MSYS2's
+# mingw64 binutils and is not on PATH by default.
+if (Test-Path (Join-Path $cargo 'bindgen.exe')) {
+    $env:MESA_SWITCH_BINDGEN = (Join-Path $cargo 'bindgen.exe')
+}
+$mingw = 'C:\msys64\mingw64\bin'
+if (Test-Path $mingw) { $env:PATH = "$mingw;$env:PATH" }
 
 $setupScript = Join-Path $PSScriptRoot 'nvk_meson_setup.sh'
 $buildScript = Join-Path $PSScriptRoot 'nvk_meson_build.sh'

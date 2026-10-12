@@ -21,6 +21,7 @@
 /app/out/
 /shaders/wasm/out/
 /mesa/work/
+/mesa-switch-install/
 *.nro
 *.nacp
 *.elf

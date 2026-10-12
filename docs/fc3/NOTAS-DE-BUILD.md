@@ -235,4 +235,173 @@ exatamente este.
 Como de contornar sem mexer no SDK (ainda nao testado): `tools/read_before_write.py` e as ferramentas de pointer nao
 se aplicam aqui, porque o problema e descoberta de funcao, nao analise de ponteiro. A opcao e patch no
 `phase_discover.cpp` para que branches internos que o PDATA joga dentro da propria regiao ainda virem
-`addUnresolvedJumpToFunction` quando o endereco alvo nao for coberto por nenhum bloco指令 ja descoberta.
+`addUnresolvedJumpToFunction` quando o endereco alvo nao for coberto por nenhum bloco ja descoberto.
+
+## 11. Instalar o ambiente na mao (2026-10-10)
+
+O `MSYS2.MSYS2` do winget termina com `0xC0000135` nesta maquina. O `msys2-base-<data>.tar.xz` do
+GitHub funciona:
+
+```powershell
+$ProgressPreference='SilentlyContinue'
+Invoke-WebRequest https://github.com/msys2/msys2-installer/releases/download/<data>/msys2-base-x86_64-<data>.tar.xz -OutFile msys2-base.tar.xz
+tar -xJf msys2-base.tar.xz -C C:\          # cria C:\msys64
+```
+
+`pacman-key --init` precisa de varias tentativas: o keyserver falha de forma intermitente. O
+`devkitPro` precisa de duas chaves que o MSYS2 **nao consegue buscar** (o gpg dele nao alcanca o
+keyserver, embora o PowerShell alcance):
+
+```powershell
+foreach($k in @('BC26F752D25B92CE272E0F44F7FD5492264BB9D0','62C7609ADA219C60')){
+  Invoke-WebRequest "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x$k" -OutFile "C:\msys64\home\barba\dkp-$k.asc"
+}
+bash -lc "pacman-key --add ~/dkp-*.asc; pacman-key --lsign BC26F752D25B92CE272E0F44F7FD5492264BB9D0"
+```
+
+O `HOME` do MSYS2 e `/home/<usuario>`, nao `/home/` — copie as chaves para `C:\msys64\home\<usuario>\`,
+senao `~/dkp-key.asc` nao existe e o erro e "No such file or directory" sem dizer qual arquivo.
+
+Depois: os repositorios em `/etc/pacman.conf` (`[dkp-libs]` + `[dkp-windows]`, este ultimo com
+`x86_64` literal, **nao** `$arch` — o `$arch` do PowerShell e expandido antes de chegar no bash), o
+pacote `make` (o MSYS2 base nao traz), e por fim `pacman -S switch-dev`.
+
+O instalador do devkitPro hoje poe tudo em `C:\msys64\opt\devkitpro`, entao `C:\devkitPro` precisa ser
+um junction para esse caminho: os scripts do repositorio (§10, `build_switch.ps1`) assumem o layout
+antigo, onde o MSYS2 ficava em `<DEVKITPRO>\msys2`. Os dois scripts foram corrigidos para sondar os
+dois layouts, mas o junction tambem e o que faz o `switch-devkitA64.cmake` achar o `DEVKITPRO` sem
+`-D` na linha de comando.
+
+## 12. O build do PC para depois do codegen (2026-10-10)
+
+`cmake --build out\pc` roda o passo `Generating recompiled code for fc3`, **planeja os 443 passos
+seguintes e sai com codigo 0 sem compilar nada nem relinkar `fc3.exe`**. Nao ha erro no log: o ninja
+replaneja depois do passo de codegen e para ali.
+
+O que faz funcionar e rodar o configure depois do codegen:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\win\run.ps1 out\pc_configure.log "cmake --preset win-pc -S app"
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\win\run.ps1 out\pc_build.log "cmake --build out\pc -j 32"
+```
+
+O sintoma e silencioso e enganoso: um `fc3.exe` antigo continua no lugar, com o timestamp velho, e o
+`boot_test.ps1` roda esse binario velado e da a impressao de que a mudanca nao teve efeito. Confira
+sempre o timestamp de `out\pc\fc3.exe` depois de um patch. Para ver o que o ninja quer fazer:
+
+```powershell
+ninja -C out\pc -n -d explain          # planeja, nao executa
+```
+
+E o `env.ps1` ganhou o Python: o primeiro `python` no PATH e o alias da Microsoft Store, que abre a
+loja em vez de rodar, e `post_codegen.py` falha sem traceback util.
+
+## 13. O build do NVK: o que travava de verdade (2026-10-11)
+
+A §10 deste arquivo descrevia o build do Mesa parando em conflito de tipos no `nouveau_switch_winsys.c`.
+**Esse conflito ja nao existe** — o patch nfsmw traz a assinatura certa e o `nouveau_screen.h:145` casa
+com a chamada. O que travava mesmo eram quatro coisas, nesta ordem.
+
+### 13.1 `byacc` nao existe no MSYS2
+
+`meson.build:2243` procura `byacc` **so depois de** `bison` (linha 2240). Bastava `bison` instalado:
+
+```bash
+pacman -S --needed --noconfirm bison flex
+```
+
+### 13.2 zlib linkado como `.so`
+
+O build do subprojeto zlib falhava com `undefined reference to 'main'`: o meson o montava como
+biblioteca compartilhada, e um `.so` cross-compilado nao tem `main`. O NRO precisa de estatico. Em
+`nvk_meson_setup.sh`:
+
+```sh
+--default-library=static
+```
+
+### 13.3 O cross file apontava para a pasta antiga (a causa raiz)
+
+Depois da mudanca do projeto, `mesa-switch/switch_cross_file.txt` continuava com os `-I` absolutos do
+caminho antigo. **Um `-I` para um diretorio que nao existe nao da erro: o compilador aceita a flag, o
+include so falha depois, e a mensagem parece header faltando:**
+
+```
+nouveau_switch_libdrm.h:19: fatal error: winsys/nouveau/switch/nouveau.h: No such file or directory
+```
+
+O caminho `/c/Users/...` do MSYS2 **funciona** — o MSYS2 converte para `C:\Users\...` quando lanca o
+gcc nativo. O que estava errado era so o caminho. `tools\win\probe_crossfile_paths.sh` prova os dois
+fatos.
+
+Confirme sempre com `out\mesa\build.ninja`, que e onde a resposta fica gravada:
+
+```powershell
+Select-String -Path out\mesa\build.ninja -Pattern "nouveau_switch_libdrm.c.o:" -Context 0,5
+```
+
+### 13.4 `-Reuse` nao relê o cross file
+
+Com `-Reuse`, `meson setup` nao roda e os `c_args` ficam os que estavam no build gerado, **mesmo depois
+de editar o cross file**. O ninja ve o cross file mudar e refaz o `configure`, mas isso nao reinsere os
+`c_args`. Depois de mexer no cross file, o build tem de ser do zero:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\win\build_nvk.ps1 -Jobs 24     # sem -Reuse
+```
+
+### Dependencias do MSYS2 para o Mesa
+
+`tools\win\install_mesa_deps.sh` instala tudo de uma vez. O Python do MSYS2 e PEP 668 (o pip recusa
+instalar nele), entao os pacotes Python vem pelo `pacman`: `python-mako`, `python-setuptools`,
+`python-markupsafe`, `python-yaml`.
+
+### 13.5 Os headers que discordavam (o Gallium nouveau)
+
+`-I` resolvido, o build chegou no conflito de tipos que a §10 descrevia. **A causa era dupla:**
+
+1. `src/gallium/drivers/nouveau/nouveau_winsys.h` declarava, sozinho, toda a API
+   `nouveau_switch_pushbuf_*` — e `src/gallium/winsys/nouveau/switch/nouveau_switch_public.h`
+   declara **exatamente as mesmas funcoes, com os mesmos prototipos**. Duas declaracoes de cada funcao
+   dao "conflicting types" assim que as duas headers ficam visiveis. A segunda copia foi removida e
+   trocada por `#include "winsys/nouveau/switch/nouveau_switch_public.h"`.
+
+2. `nouveau_winsys.h` incluia `winsys/nouveau/drm/nouveau.h` **antes** do header do Switch. As duas
+   headers definem `struct nouveau_pushbuf` (e vizinhas) e usam o **mesmo include guard**: ganha a
+   primeira, e a segunda e descartada em silencio. Como a do DRM vinha primeiro, todas as structs do
+   Switch viravam o layout do DRM — e era isso que produzia a lista inteira de
+   `passing argument 1 ... from incompatible pointer type`. O include do DRM agora e
+   `#ifndef __SWITCH__`.
+
+### 13.6 O Vulkan nao era habilitado — e o `-D` que faltava
+
+Com os headers resolvidos, o build passou, mas **nao gerou nenhum alvo Vulkan e nenhum
+`libvulkan.a`**. O `meson-log.txt` diz:
+
+```
+Run-time dependency spirv-tools found: NO
+  Vulkan
+```
+
+Duas coisas diferentes. A opcao `spirv-tools` e `auto` e `dependency('SPIRV-Tools')` falha sem
+aviso (o `wrap` nao existe em `subprojects/`), e o Vulkan inteiro e pulado.
+
+**A correcao esta no proprio `build-switch.sh` do mesa-switch**, que e a receita com que esta arvore
+foi feita. As flags que faltavam:
+
+```
+-Dvulkan-drivers=nouveau      # sem isso NAO existe alvo Vulkan nenhum
+-Degl=disabled -Dopengl=false -Dgles1=disabled -Dgles2=disabled -Dglx=disabled
+```
+
+A segunda linha e o que mata o problema do Gallium: `src/egl/meson.build:155` faz `error()` quando a
+plataforma e `switch` e o Gallium nouveau nao esta ligado — ou seja, era o EGL que obrigava a metade do
+Gallium a entrar no build, e a metade do Gallium e justamente a que os headers nao fecham. Desligando
+GL e EGL sobra so a metade Vulkan, que e a unica que o NRO usa.
+
+Note que o valor e **`nouveau`**, nao `nvk`: a §10 deste arquivo diz que o meson rejeita `nvk`, o que
+e verdade, mas a flag correta existia e nao estava no `nvk_meson_setup.sh`.
+
+`build-switch.sh` ainda faz um **build nativo** antes, para ter `mesa_clc` e `vtn_bindgen2` no PATH.
+Esse passo nao esta aqui: ele exige um LLVM do host casando com o Mesa 26.2, e o NVK nao usa o
+caminho do CLC. Se faltar `mesa_clc` no build cross, e esse o proximo passo.

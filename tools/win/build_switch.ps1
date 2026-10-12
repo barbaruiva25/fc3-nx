@@ -31,11 +31,24 @@ if ($Reconfigure -or -not (Test-Path (Join-Path $build 'CMakeCache.txt'))) {
 # GCC's lto-wrapper compiles the LTRANS partitions in parallel only through GNU make: without a make on PATH it runs
 # all 512 of them one after another (about 17 minutes). env.ps1 keeps MSYS2's usr\bin off PATH (its own cmd, link
 # and find), so make.exe and the three DLLs it needs get a folder of their own.
+# devkitPro ships in two layouts and only the old one has <DEVKITPRO>\msys2: the current installer puts MSYS2 in
+# C:\msys64 (pacman) and devkitPro under its own opt\. Probe both, plus MSYS2_ROOT, instead of assuming.
 $make = Join-Path $root 'out\tools\make'
 if (-not (Test-Path (Join-Path $make 'make.exe'))) {
+    $candidates = @(
+        (Join-Path $devkitpro 'msys2\usr\bin'),
+        (Join-Path $devkitpro '..\..\usr\bin'),          # <msys2>\opt\devkitpro -> <msys2>\usr\bin
+        $(if ($env:MSYS2_ROOT) { Join-Path $env:MSYS2_ROOT 'usr\bin' }),
+        'C:\msys64\usr\bin'
+    ) | Where-Object { $_ -and (Test-Path (Join-Path $_ 'make.exe')) }
+    $src = $candidates | Select-Object -First 1
+    if (-not $src) {
+        throw "no make.exe found for the LTO link (looked in: $($candidates -join ', ')). " +
+              'On MSYS2 it is the `make` pacman package.'
+    }
     New-Item -ItemType Directory -Force $make | Out-Null
     foreach ($f in 'make.exe', 'msys-2.0.dll', 'msys-iconv-2.dll', 'msys-intl-8.dll') {
-        Copy-Item -Force (Join-Path $devkitpro "msys2\usr\bin\$f") $make
+        if (Test-Path (Join-Path $src $f)) { Copy-Item -Force (Join-Path $src $f) $make }
     }
 }
 $env:PATH = "$make;$env:PATH"

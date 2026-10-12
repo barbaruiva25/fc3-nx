@@ -11,8 +11,10 @@ o Switch; o desenho do jogo passa a ser feito por um renderer Vulkan nativo sobr
 
 ## Estado
 
-Etapa 1 (recompilar e bootar no PC). O jogo esta extraido, o SDK configurado e o gerador de codigo compilando.
-Veja `../docs/PLANO.md` para o andamento e `../docs/NOTAS-DE-BUILD.md` para as peculiarities do build.
+Etapa 1 (recompilar e bootar no PC). O jogo esta extraido, o SDK configurado, o gerador de codigo compilando e
+o `fc3.exe` linkado; o loop de boot para num acesso a `guest 0x13C`. A causa raiz esta em
+`docs/fc3/DIAGNOSTICO-BOOT-0x13C.md`, o andamento em `docs/fc3/RESUMO.md`, o plano em `docs/fc3/PLANO.md` e as
+peculiarities do build em `docs/fc3/NOTAS-DE-BUILD.md`.
 
 ## O jogo
 
@@ -26,10 +28,19 @@ Veja `../docs/PLANO.md` para o andamento e `../docs/NOTAS-DE-BUILD.md` para as p
 
 ## O que e preciso
 
-- **Sua propria copia do jogo.** Nenhum dado do jogo e distribuido aqui. O `default.xex` fica em
-  `assets/game_root/` (junction para `../assets`, que e ignorado pelo git).
-- **PC:** Windows 10/11, VS 2022 Build Tools, LLVM clang, Python 3, Git, devkitPro (devkitA64 + libnx).
-- **Switch:** o NVK (Mesa para Switch) compilado como `libvulkan.a`, apontado por `NVK_SDK`.
+- **Sua propria copia do jogo.** Nenhum dado do jogo e distribuido aqui. `fc3-nx\assets` e um junction para
+  `..\assets` (que fica fora do git), e o manifest aponta para `../../assets/game_root`.
+- **PC:** Windows 10/11, VS 2022 Build Tools, LLVM clang, Python 3, Ninja.
+- **Switch:** devkitPro (devkitA64 + libnx) em `C:\devkitPro`, e o NVK (Mesa para Switch) compilado como
+  `libvulkan.a`, apontado por `NVK_SDK`. O build do NVK esta em `tools\win\build_nvk.ps1`; ate o NVK
+  compilar, a Etapa 3 nao fecha (ver `docs/fc3/NOTAS-DE-BUILD.md` §10).
+
+O ambiente de build do PC e montado por `tools\win\env.ps1` (MSVC + clang + CMake + Ninja). Todo comando
+de build passa por `tools\win\run.ps1`, que o carrega e grava o log:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\win\run.ps1 out\build.log "cmake --build out/pc"
+```
 
 ## Build
 

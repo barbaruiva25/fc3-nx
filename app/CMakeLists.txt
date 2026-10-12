@@ -108,6 +108,14 @@ if(NOT REXGLUE_PLATFORM_SWITCH)
     list(APPEND fc3_SOURCES src/me/me_pc_stubs.cpp)
     # Sampling CPU profiler for PC tests (from nfsmw-nx via banjo-nx; fc3_cpu_profile_from_s, logs/perfil_pc.csv).
     list(APPEND fc3_SOURCES src/profiler/fc3_cpu_profile_pc.cpp)
+else()
+    # Stage 1 on the Switch: the native renderer is off (see fc3_BUILD_NATIVE_RENDERER above), but the
+    # app still references two of its symbols (fc3_capture.cpp: PresentedSwaps/SetPresentHook). The PC
+    # stubs cannot be reused: RexSwitchPerfCount/RexSwitchPerfHitch already exist in the SDK's
+    # switch_perf.cpp and would clash. me_switch_stubs.cpp carries only the me::native pieces.
+    if(NOT fc3_BUILD_NATIVE_RENDERER)
+        list(APPEND fc3_SOURCES src/me/me_switch_stubs.cpp)
+    endif()
 endif()
 
 # The codegen flavour (tools/codegen.ps1 -Flavor) names the build in the first "[enh]" log line.

@@ -9,6 +9,7 @@
 #include <switch.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <map>
 #include <set>
 #include <atomic>
@@ -113,6 +114,21 @@ struct State {
     size_t   committed = 0;
     size_t   mapped = 0;
     uint32_t last_result = 0;
+
+    /*
+     * Last commits, oldest first. For the fatal crash report: it tells whether the
+     * faulting page was ever committed (and when, relative to the crash) or whether
+     * the game touched memory it never allocated. Written under the same lock, read
+     * back under it in the fatal path.
+     */
+    static constexpr size_t kCommitHistory = 32;
+    struct CommitRecord {
+        size_t offset = 0;
+        size_t length = 0;
+        uint32_t result = 0; /* 0 = ok, else RexGmLastResult at the time */
+    };
+    CommitRecord commits[kCommitHistory] = {};
+    size_t commit_pos = 0;
 };
 
 State& S() {
@@ -139,6 +155,15 @@ Chunk* ChunkAt(State& s, size_t offset) {
     --it;
     Chunk& c = it->second;
     return (offset >= c.offset && offset < c.offset + c.length) ? &c : nullptr;
+}
+
+/* Remembers a commit for the fatal crash report (result 0 = ok, else the failure). */
+void RecordCommit(State& s, size_t offset, size_t length, uint32_t result) {
+    State::CommitRecord& r = s.commits[s.commit_pos % State::kCommitHistory];
+    r.offset = offset;
+    r.length = length;
+    r.result = result;
+    s.commit_pos++;
 }
 
 /* The view that contains a window address. */
@@ -450,6 +475,41 @@ uint32_t RexGmLastResult(void) {
     return s.last_result;
 }
 
+size_t RexGmCommitHistory(char* out, size_t cap) {
+    State& s = S();
+    std::lock_guard<std::mutex> lock(s.mutex);
+    if (!out || cap == 0) return 0;
+    size_t written = 0;
+    const size_t total = s.commit_pos < State::kCommitHistory ? s.commit_pos : State::kCommitHistory;
+    for (size_t i = 0; i < total; ++i) {
+        /* Oldest first: commit_pos counts all commits ever. */
+        const State::CommitRecord& r =
+            s.commits[(s.commit_pos - total + i) % State::kCommitHistory];
+        const int n = std::snprintf(out + written, cap - written,
+                                    "commit[%zu]: offset=0x%zx len=0x%zx %s\n", total - 1 - i,
+                                    r.offset, r.length,
+                                    r.result == 0 ? "ok" : "FAIL");
+        if (n < 0) break;
+        if (static_cast<size_t>(n) >= cap - written) {
+            written = cap - 1;
+            break;
+        }
+        written += static_cast<size_t>(n);
+        if (r.result != 0) {
+            const int m = std::snprintf(out + written, cap - written,
+                                        "  fail code=0x%08x\n", r.result);
+            if (m < 0) break;
+            if (static_cast<size_t>(m) >= cap - written) {
+                written = cap - 1;
+                break;
+            }
+            written += static_cast<size_t>(m);
+        }
+    }
+    out[written] = '\0';
+    return written;
+}
+
 bool RexGmAddView(uint8_t* base, size_t offset, size_t length) {
     State& s = S();
     std::lock_guard<std::mutex> lock(s.mutex);
@@ -483,7 +543,10 @@ bool RexGmCommit(size_t offset, size_t length, RexGmAccess access) {
 
     State& s = S();
     std::lock_guard<std::mutex> lock(s.mutex);
-    if (!s.base) return false;
+    if (!s.base) {
+        RecordCommit(s, offset, length, 0xFFFFFFFEu); /* no window */
+        return false;
+    }
 
     /*
      * Committed in whole kBlockSize granules, not just the requested pages. Guest
@@ -516,6 +579,7 @@ bool RexGmCommit(size_t offset, size_t length, RexGmAccess access) {
         void* backing = memalign(align, sz);
         if (!backing) {
             s.last_result = REX_GM_ERR_NOMEM;
+            RecordCommit(s, offset, length, s.last_result);
             return false;
         }
         memset(backing, 0, sz);
@@ -530,11 +594,13 @@ bool RexGmCommit(size_t offset, size_t length, RexGmAccess access) {
         if (!shadow) {
             free(backing);
             s.last_result = REX_GM_ERR_NOCODEVA;
+            RecordCommit(s, offset, length, s.last_result);
             return false;
         }
         if (R_FAILED(rc)) {
             free(backing);
             s.last_result = rc;
+            RecordCommit(s, offset, length, s.last_result);
             return false;
         }
 
@@ -545,6 +611,7 @@ bool RexGmCommit(size_t offset, size_t length, RexGmAccess access) {
                                       reinterpret_cast<u64>(backing), sz);
             free(backing);
             s.last_result = rc;
+            RecordCommit(s, offset, length, s.last_result);
             return false;
         }
 
@@ -559,6 +626,7 @@ bool RexGmCommit(size_t offset, size_t length, RexGmAccess access) {
 
         cur = gap_end;
     }
+    RecordCommit(s, offset, length, 0);
     return true;
 }
 

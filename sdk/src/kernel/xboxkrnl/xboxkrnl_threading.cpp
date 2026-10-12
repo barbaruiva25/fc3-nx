@@ -271,12 +271,78 @@ void KeSetCurrentStackPointers_entry(mapped_void stack_ptr, ppc_ptr_t<X_KTHREAD>
                                      mapped_void stack_alloc_base, mapped_void stack_base,
                                      mapped_void stack_limit) {
   auto current_thread = XThread::GetCurrentThread();
+  if (!current_thread || !current_thread->thread_state() ||
+      !current_thread->thread_state()->context()) {
+    REXKRNL_IMPORT_TRACE("KeSetCurrentStackPointers", "no current thread");
+    return;
+  }
   auto context = current_thread->thread_state()->context();
+
+  // On the console this export is the tail of a kernel thread switch (KiSwapThread): it hands the kernel
+  // stack to the thread that is about to run and the thread never comes back here. The guest code that
+  // calls it was compiled knowing that - the caller has already finished with r14..r31 and reads none of
+  // them again.
+  //
+  // Here the host returns into the guest call chain, so the guest walks back into code that had already
+  // committed to the switch, reading registers the switch was free to destroy. That is the crash in
+  // Far Cry 3: sub_8363CE50 (the kernel switch routine) overwrites r28 with a field of the outgoing
+  // thread context, tail-branches into this export, and the caller - sub_8237E408 - comes back and does
+  // "lwz r11,316(r28)" with r28 == 0 (docs/fc3/DIAGNOSTICO-BOOT-0x13C.md).
+  //
+  // Keeping the non-volatile set makes the return look to the guest like the 'bl' it was, which is the
+  // closest a returning host implementation can get to a thread switch that does not return. r1 is kept
+  // for the same reason: this is a switch that never happened, so the live context's stack pointer still
+  // has to be the one the guest is running on.
+  const PPCRegister r14 = context->r14;
+  const PPCRegister r15 = context->r15;
+  const PPCRegister r16 = context->r16;
+  const PPCRegister r17 = context->r17;
+  const PPCRegister r18 = context->r18;
+  const PPCRegister r19 = context->r19;
+  const PPCRegister r20 = context->r20;
+  const PPCRegister r21 = context->r21;
+  const PPCRegister r22 = context->r22;
+  const PPCRegister r23 = context->r23;
+  const PPCRegister r24 = context->r24;
+  const PPCRegister r25 = context->r25;
+  const PPCRegister r26 = context->r26;
+  const PPCRegister r27 = context->r27;
+  const PPCRegister r28 = context->r28;
+  const PPCRegister r29 = context->r29;
+  const PPCRegister r30 = context->r30;
+  const PPCRegister r31 = context->r31;
+  const uint64_t r1 = context->r1.u64;
+
   auto pcr =
       REX_KERNEL_MEMORY()->TranslateVirtual<X_KPCR*>(static_cast<uint32_t>(context->r13.u64));
 
   UpdateGuestStackPointers(thread, pcr, context, stack_ptr.guest_address(),
                            stack_alloc_base.value(), stack_base.value(), stack_limit.value());
+
+  REXKRNL_IMPORT_TRACE("KeSetCurrentStackPointers",
+                       "sp={:08X} alloc={:08X} base={:08X} limit={:08X}",
+                       stack_ptr.guest_address(), stack_alloc_base.value(), stack_base.value(),
+                       stack_limit.value());
+
+  context->r14 = r14;
+  context->r15 = r15;
+  context->r16 = r16;
+  context->r17 = r17;
+  context->r18 = r18;
+  context->r19 = r19;
+  context->r20 = r20;
+  context->r21 = r21;
+  context->r22 = r22;
+  context->r23 = r23;
+  context->r24 = r24;
+  context->r25 = r25;
+  context->r26 = r26;
+  context->r27 = r27;
+  context->r28 = r28;
+  context->r29 = r29;
+  context->r30 = r30;
+  context->r31 = r31;
+  context->r1.u64 = r1;
 }
 
 u32 KeSetAffinityThread_entry(mapped_void thread_ptr, u32 affinity,

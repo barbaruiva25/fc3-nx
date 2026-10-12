@@ -158,6 +158,11 @@ void* RexGmShadowFor(uint64_t window_address);
 /* Bytes of backing committed right now. For diagnostics. */
 size_t RexGmCommittedBytes(void);
 
+/* Last commits, oldest first, for the fatal crash report. Writes at most cap bytes into out
+ * (always NUL-terminated if cap > 0) and returns the bytes written excluding the NUL.
+ * Each line: "commit[ago]: offset=0x... len=0x... ok|fail(0x...)". */
+size_t RexGmCommitHistory(char* out, size_t cap);
+
 /* Number of committed chunks (each is a code alias and up to one mapping per view). */
 size_t RexGmChunkCount(void);
 

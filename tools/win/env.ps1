@@ -33,6 +33,14 @@ if (-not $env:FC3_ENV_LOADED) {
     $env:PATH = "$llvm\bin;$cm\CMake\bin;$cm\Ninja;$env:PATH"
     $env:CC = 'clang'
     $env:CXX = 'clang++'
+    # tools\codegen.ps1 and tools\win\package_switch.ps1 call `python` by name. On Windows the first `python` on PATH
+    # is usually the Microsoft Store alias (WindowsApps\python.exe), which opens the Store instead of running, and
+    # post_codegen.py then fails without a traceback. Put the real interpreter first; FC3_PYTHON overrides.
+    $py = if ($env:FC3_PYTHON) { $env:FC3_PYTHON } else {
+        Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python3*\python.exe') -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending | Select-Object -First 1 | ForEach-Object { $_.DirectoryName }
+    }
+    if ($py -and (Test-Path (Join-Path $py 'python.exe'))) { $env:PATH = "$py;$env:PATH" }
     # The reXGlue code generator links with the MSVC driver; keep clang from picking lld-link, which does not
     # understand the MSVC import-library flags the SDK's compiler checks pass.
     Remove-Item Env:LLD_LINK -ErrorAction SilentlyContinue

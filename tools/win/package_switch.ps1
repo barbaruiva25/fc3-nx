@@ -19,7 +19,14 @@ Copy-Item -Force $nro (Join-Path $dest 'fc3.nro')
 Copy-Item -Force (Join-Path $root 'app\fc3_switch.toml') (Join-Path $dest 'fc3.toml')
 Copy-Item -Force (Join-Path $root 'docs\switch-testing.md') (Join-Path $dest 'README.md')
 foreach ($f in 'fc3_shaders.mesp', 'fc3_shaders.mesp.idx') {
-    Copy-Item -Force (Join-Path $root "out\shaders\$f") (Join-Path $dest $f)
+    $src = Join-Path $root "out\shaders\$f"
+    if (Test-Path $src) {
+        Copy-Item -Force $src (Join-Path $dest $f)
+    } else {
+        # Stage 1: the native renderer (and its shader package) does not exist yet; the app draws with
+        # ReXGlue's emulated Xenos GPU, which needs no shader pack. Skip instead of failing.
+        Write-Host "note: no shader package at $src (native renderer off); skipping"
+    }
 }
 # Since 2026-10-06 only the optimised-codegen NRO is delivered (the user's choice): build it from the optimised working
 # tree and package WITHOUT -AbPair. The old codegen A/B pair, kept for reference: with -AbPair, fc3.nro is

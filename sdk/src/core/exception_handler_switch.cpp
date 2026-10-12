@@ -577,6 +577,37 @@ extern "C" void RexSwitchCrashLog(const char* reason, const ThreadExceptionDump*
              "far in region 0x%016" PRIx64 "+0x%" PRIx64 " type 0x%x permissions 0x%x\n",
              fm.addr, fm.size, fm.type, fm.perm);
     }
+    // Guest-memory diagnosis (fc3-nx: faults on Switch heap writes). Which view the address
+    // belongs to and at which mapping offset, its logical protection, the last core failure,
+    // and the commit/map counters. This tells apart the three ways to die here:
+    //   - offset outside [0x100000000, 0x120000000) + no chunk: virtual heap never committed
+    //     (the handler only auto-commits physical memory);
+    //   - access == REX_GM_READ on a write: GPU write-watching; writes are not emulated;
+    //   - commit/map counters at the ceiling: Horizon's mappable-memory limit (2001-0103).
+    {
+      size_t gm_off = 0;
+      const bool in_view = RexGmWindowToOffset(ctx->far.x, &gm_off);
+      size_t plen = 0x1000;
+      RexGmAccess acc = REX_GM_NONE;
+      const bool has_prot =
+          RexGmQueryProtect(reinterpret_cast<uint8_t*>(ctx->far.x), &plen, &acc);
+      Append(b, "gm: in_view=%d offset=0x%zx prot=%d(%s) lastresult=0x%08x "
+             "committed=%zuMB chunks=%zu mapped=%zuMB(incl_mirrors)\n",
+             in_view ? 1 : 0, gm_off, (int)acc, has_prot ? "yes" : "no",
+             RexGmLastResult(), RexGmCommittedBytes() >> 20, RexGmChunkCount(),
+             RexGmMappedBytes() >> 20);
+    }
+    // Last commits, oldest first: was the faulting page ever committed, or did the game touch
+    // memory it never allocated (fc3-nx: uncommitted virtual heap)?
+    {
+      static char hist[4096];
+      const size_t n = RexGmCommitHistory(hist, sizeof(hist));
+      if (n) {
+        Append(b, "gm commit history (last %s):\n",
+               "32, oldest first; FAIL = commit failed, check code");
+        Append(b, "%s", hist);
+      }
+    }
     const uint64_t gm = reinterpret_cast<uint64_t>(RexGmBase());
     if (gm && ctx->far.x >= gm && ctx->far.x < gm + RexGmSize()) {
       Append(b, "far inside the guest memory: 0x%08" PRIx64 "\n", ctx->far.x - gm);
