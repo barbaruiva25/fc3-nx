@@ -224,3 +224,7 @@
 # Runtime auto-resolve candidate, accepted from an observed indirect-call failure.
 # Observed entry +0x10 inside the 24-byte gap 0x83D37E68-0x83D37E80; only this address is declared.
 "0x83D37E78" = { }
+
+# Runtime auto-resolve candidate, accepted from an observed indirect-call failure.
+# Observed entry +0x10 inside the 48-byte gap 0x82DA59C8-0x82DA59F8; only this address is declared.
+"0x82DA59D8" = { }
