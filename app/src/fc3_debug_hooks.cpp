@@ -13,6 +13,9 @@
 #include <rex/hook.h>
 #include <rex/logging.h>
 
+// One-shot write watch for the corruptible node (defined in fc3_crash_log.cpp).
+void Fc3ArmNodeWatch(uint8_t* host_base, uint32_t guest_addr);
+
 // ---------------------------------------------------------------------------------------------
 // CRASH UNDER INVESTIGATION: out\pc\logs\fc3_002.log onwards (2026-10-10)
 //
@@ -391,6 +394,85 @@ REX_HOOK_RAW(sub_8360ED78) {
     }
     REXLOG_WARN("[dbg] OUT fmt8360ED78 #{} dest='{}' r3={:08X}", n, out, ctx.r3.u32);
   }
+  return;
+}
+
+// The node creator behind the vec/tree crashes: sub_82340988 allocates a 0x20-byte node
+// (via sub_82412EE8, lr=0x823409C0), links it as [r30] and inits [node+0]=1. Arms the
+// write watch when the deterministic corrupt node comes out of it.
+REX_EXTERN(__imp__sub_82340988);
+REX_HOOK_RAW(sub_82340988) {
+  static std::atomic<int> n_mk{0};
+  const int n = n_mk.fetch_add(1) + 1;
+  // r30 is restored by the callee epilogue before this hook regains control, so the
+  // tree (entry r3) must be captured here, not at exit.
+  const uint32_t tree_in = ctx.r3.u32;
+  if (n <= 15) {
+    REXLOG_WARN("[dbg] IN  mk40988 #{} tree(r3)={:08X} r4={:08X} lr={:08X}", n, tree_in,
+                ctx.r4.u32, static_cast<uint32_t>(ctx.lr));
+  }
+  __imp__sub_82340988(ctx, base);
+  if (n <= 600) {
+    uint32_t node = 0;
+    bool has_node = false;
+    if (tree_in >= 0x82000000u && tree_in < 0x84060000u) {
+      node = GuestLoad32(base, tree_in);
+      has_node = true;
+    }
+    if (n <= 15 || tree_in == 0x83E97FC8u || node == 0xF90CAA20u) {
+      REXLOG_WARN("[dbg] OUT mk40988 #{} tree={:08X} [tree]={:08X}({})", n, tree_in, node,
+                  has_node);
+    }
+    if (node == 0xF90CAA20u) {
+      REXLOG_WARN("[dbg] creator40988: tree={:08X} node={:08X}, arming watch", tree_in, node);
+      Fc3ArmNodeWatch(base, node);
+    }
+  }
+  return;
+}
+
+// Crash fc3_045.log (2026-10-13, COM TU): guest read of 0x04020000 at fc3.exe+0x65BC600,
+// symbolized (VA) to sub_82385378 (fc3_recomp.288.cpp:326, "lwz r4,0(r7)"): a vector-append
+// whose data pointer [r3+4] is 0x04020000 (unmapped). Register-only (never dereferences):
+// match the crashing r3 against sub_82405188 OUT lines to see if it is a fresh object.
+REX_EXTERN(__imp__sub_82385378);
+REX_HOOK_RAW(sub_82385378) {
+  static std::atomic<int> n_vec{0};
+  const int n = n_vec.fetch_add(1) + 1;
+  if (n <= 40) {
+    // r3 is the caller's stack descriptor (mapped): [r3+4] is the bucket pointer the
+    // crash reads, [r3+140] the count. Constant-bad = never initialized; changing = corruption.
+    const uint32_t d = ctx.r3.u32;
+    const uint32_t bkt = GuestLoad32(base, d + 4);
+    const uint32_t cnt = reinterpret_cast<const uint8_t*>(base)[d + 140];
+    // r31 here is the CALLER's r31 = the manager object owning +968: match it against
+    // OUT sub_82405188 lines to find its allocation site (fresh+uninit vs old+corrupted).
+    // Plus: dump the deterministic corrupt node (allocated, hence committed) to see whether
+    // only [0] is bad (targeted write) or the whole block is garbage (uninitialized).
+    uint32_t w0 = 0, w1 = 0, w2 = 0, w3 = 0, w4 = 0, w5 = 0, w6 = 0, w7 = 0;
+    bool has_node = false;
+    // Both chain nodes are allocated long before the vec loop (hence committed); anything
+    // else is left alone so the logger itself can never fault.
+    if (bkt == 0xF90CAA20u || bkt == 0xF90E9844u) {
+      has_node = true;
+      w0 = GuestLoad32(base, bkt);
+      w1 = GuestLoad32(base, bkt + 4);
+      w2 = GuestLoad32(base, bkt + 8);
+      w3 = GuestLoad32(base, bkt + 12);
+      w4 = GuestLoad32(base, bkt + 16);
+      w5 = GuestLoad32(base, bkt + 20);
+      w6 = GuestLoad32(base, bkt + 24);
+      w7 = GuestLoad32(base, bkt + 28);
+    }
+    REXLOG_WARN("[dbg] IN  vec85378 #{} obj(r3)={:08X} [r3+4]={:08X} [r3+140]={} mgr(r31)={:08X} "
+                "lr={:08X}",
+                n, d, bkt, cnt, ctx.r31.u32, static_cast<uint32_t>(ctx.lr));
+    if (has_node) {
+      REXLOG_WARN("[dbg] node {:08X}: {:08X} {:08X} {:08X} {:08X} {:08X} {:08X} {:08X} {:08X}",
+                  bkt, w0, w1, w2, w3, w4, w5, w6, w7);
+    }
+  }
+  __imp__sub_82385378(ctx, base);
   return;
 }
 
