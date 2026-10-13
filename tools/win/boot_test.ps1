@@ -10,7 +10,11 @@ param(
     [int]$Tail = 40,
     [int]$VideoAt = 0,
     [int]$VideoFrames = 300,
-    [int]$VideoEvery = 1
+    [int]$VideoEvery = 1,
+    # Title Update (update:\patch.dat): sem ele o jogo segue por um caminho de conteudo
+    # incompleto e os crashes seguintes sao artefatos (fc3_042/043/044). Por padrao monta
+    # ..\assets\update quando a pasta existe; passe -UpdateRoot '' para reproduzir sem TU.
+    [string]$UpdateRoot = '__auto__'
 )
 if ($VideoAt -gt 0) {
     $env:REX_fc3_VIDEO_S = "$VideoAt"
@@ -33,6 +37,15 @@ $started = Get-Date
 # Test runs are always muted and minimized (environment beats fc3.toml), so they never take over the desktop.
 $env:REX_AUDIO_MUTE = 'true'
 $env:REX_WINDOW_START_MINIMIZED = 'true'
+# Title Update: mount ..\assets\update (patch.dat/patch.fat) at update:\ unless told otherwise.
+if ($UpdateRoot -eq '__auto__') {
+    $autoUpdate = Join-Path (Split-Path $root) 'assets\update'
+    if ((Test-Path $autoUpdate) -and (Get-ChildItem $autoUpdate -Filter '*.dat' -ErrorAction SilentlyContinue)) {
+        $env:REX_update_data_root = $autoUpdate
+    }
+} elseif ($UpdateRoot -ne '') {
+    $env:REX_update_data_root = $UpdateRoot
+}
 $p = Start-Process -FilePath $exePath -WorkingDirectory $dir -PassThru -WindowStyle Minimized
 $p.WaitForExit($Seconds * 1000) | Out-Null
 if ($p.HasExited) {

@@ -394,6 +394,40 @@ REX_HOOK_RAW(sub_8360ED78) {
   return;
 }
 
+// Crash fc3_043.log (2026-10-13): guest read of 0x0502FF08 at fc3.exe+0x3E57B5B, symbolized
+// (VA form) to sub_82386818 (fc3_recomp.173.cpp:308, "lwz r10,8(r11)"): a binary-tree walk
+// whose node pointer became 0x0502FF00 (unmapped; no commit covers 0x05xxxxxx). Single static
+// caller sub_82389218 (r3=obj, r4=tree, r5=key; tree root=[r4], key word=[r5]). This hook says
+// whether the root is already garbage at entry (bad tree pointer) or turns bad mid-walk.
+REX_EXTERN(__imp__sub_82389218);
+REX_HOOK_RAW(sub_82389218) {
+  static std::atomic<int> n_tree{0};
+  const int n = n_tree.fetch_add(1) + 1;
+  const uint32_t tree = ctx.r4.u32;
+  const uint32_t key = ctx.r5.u32;
+  if (n <= 30) {
+    // Logger reads must not fault: only touch heap/image (0x40000000-0xE0000000), both
+    // committed when valid. Anything else (stack keys, garbage) is reported, not read.
+    auto in_range = [](uint32_t a) { return a >= 0x40000000u && a < 0xE0000000u; };
+    uint32_t root = 0, keyw = 0;
+    bool has_root = false, has_keyw = false;
+    if (in_range(tree)) {
+      root = GuestLoad32(base, tree);
+      has_root = true;
+    }
+    if (in_range(key)) {
+      keyw = GuestLoad32(base, key);
+      has_keyw = true;
+    }
+    REXLOG_WARN("[dbg] IN  tree89218 #{} obj={:08X} tree={:08X} root={:08X}({}) key={:08X} "
+                "[key]={:08X}({}) lr={:08X}",
+                n, ctx.r3.u32, tree, root, has_root, key, keyw, has_keyw,
+                static_cast<uint32_t>(ctx.lr));
+  }
+  __imp__sub_82389218(ctx, base);
+  return;
+}
+
 // What sub_83658240 writes to its out-param [r8]. sub_8241BBF0 shows dirty-disc when [r1+80] is 0
 // after this call; the first thing the callee does is zero it, so the question is whether anything
 // writes it back before returning.
