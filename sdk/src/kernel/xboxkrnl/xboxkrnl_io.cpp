@@ -589,6 +589,11 @@ u32 NtReadFile_entry(u32 file_handle, u32 event_handle, mapped_void apc_routine_
       result = file->Read(buffer.guest_address(), buffer_length,
                           byte_offset_ptr ? static_cast<uint64_t>(*byte_offset_ptr) : -1,
                           &bytes_read, apc_context.guest_address());
+      // TEMP DIAG (fc3-nx, 2026-10-12): result the instant file->Read returns. Remove once answered.
+      if (XFAILED(result)) {
+        REXLOG_WARN("[readfail3] file->Read {:#x} buf={:08X} len={:X} bytes={}", result,
+                    buffer.guest_address(), (uint32_t)buffer_length, bytes_read);
+      }
       if (const int32_t us_kb = REXCVAR_GET(sa2_io_us_per_kb); us_kb > 0 && bytes_read) {
         std::this_thread::sleep_for(std::chrono::microseconds(uint64_t(us_kb) * bytes_read / 1024));
       }
@@ -668,6 +673,10 @@ u32 NtReadFile_entry(u32 file_handle, u32 event_handle, mapped_void apc_routine_
         io_status_block ? (uint32_t)io_status_block->status : 0xDEAD,
         io_status_block ? (uint32_t)io_status_block->information : 0, ev && signal_event,
         apc_requested, apc_queued);
+    // TEMP DIAG (fc3-nx, 2026-10-12): which file fails reads. Remove once answered.
+    if (XFAILED(result)) {
+      REXLOG_WARN("[readfail] NtReadFile {:#x} path='{}'", result, file->path());
+    }
   } else {
     REXKRNL_IMPORT_RESULT("NtReadFile", "{:#x} (apc_requested={}, apc_queued={})", result,
                           apc_requested, apc_queued);

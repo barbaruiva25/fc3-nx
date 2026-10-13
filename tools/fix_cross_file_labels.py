@@ -108,7 +108,10 @@ def wrap_block(path, label, project):
 
     pad = '\t'
     out = lines[:start]
-    out.append(f'void {wrapper_name(label)}(PPCContext& __restrict ctx, uint8_t* base) {{\n')
+    # extern "C": the forward declarations this tool writes (and the ones lift writes at the top of
+    # the branching files) use C linkage. A C++-linkage definition mangles the name and the link
+    # fails with "undefined symbol: fc3_label_X" (fc3-nx, 2026-10-12).
+    out.append(f'extern "C" void {wrapper_name(label)}(PPCContext& __restrict ctx, uint8_t* base) {{\n')
     out.extend(body)
     if not ends_with_branch:
         out.append(f'{pad}return;\n')

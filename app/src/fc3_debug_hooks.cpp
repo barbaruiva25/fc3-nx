@@ -307,3 +307,108 @@ REX_HOOK_RAW(sub_8365D018) {
 
 // (XamShowDirtyDiscErrorUI hook removido: REX_HOOK_RAW so atua em funcoes do guest, nao em exports
 // do kernel. O chamador e registrado direto em sdk/src/kernel/xam/am_ui.cpp como [dirtycaller].)
+
+// A flag global [0x83F26860] decide o dirty-disc (sub_82B33DD8: byte 0 -> suja). O escritor e
+// sub_82B34020 (stb r30,26720(r9), r30 = r5 do chamador) e o unico chamador passa r5 = 1. Estes dois
+// hooks dizem se o escritor roda e com que r5, e que valor o leitor ve.
+REX_EXTERN(__imp__sub_82B34020);
+REX_HOOK_RAW(sub_82B34020) {
+  REXLOG_WARN("[dbg] WRITEFLAG r5={:08X} r3={:08X} r4={:08X} lr={:08X}", ctx.r5.u32, ctx.r3.u32,
+              ctx.r4.u32, static_cast<uint32_t>(ctx.lr));
+  __imp__sub_82B34020(ctx, base);
+  return;
+}
+
+REX_EXTERN(__imp__sub_82B33DD8);
+REX_HOOK_RAW(sub_82B33DD8) {
+  REXLOG_WARN("[dbg] READFLAG r3={:08X} lr={:08X}", ctx.r3.u32, static_cast<uint32_t>(ctx.lr));
+  __imp__sub_82B33DD8(ctx, base);
+  return;
+}
+
+// Dirty-disc path 2 (the one the PC actually takes): sub_8241BBF0 shows the UI unconditionally
+// when called (both its branches reach sub_8362CD00), so the caller IS the error. Three callers exist;
+// this names which one and with what args.
+REX_EXTERN(__imp__sub_8241BBF0);
+REX_HOOK_RAW(sub_8241BBF0) {
+  // r3 is a title/message string in the image (e.g. 0x8200EDD8 from sub_8241BD28, which formats the
+  // detail into its own frame first). Byte loads are endian-neutral: copy straight from the arena.
+  // The detail string: sub_8241BD28 did stwu r1,-352 before calling, and formatted into [r1+80] of
+  // its own frame, so here it is at [[r1+432]].
+  auto read_guest_str = [&](uint32_t addr, char* dst, size_t cap, bool image_only) {
+    if (image_only && (addr < 0x82000000u || addr >= 0x84000000u)) return;
+    for (size_t i = 0; i < cap - 1; ++i) {
+      const uint32_t a = addr + uint32_t(i);
+      const uint32_t host_off = a + ((a >= 0xE0000000u) ? 0x1000u : 0u);
+      const char c = reinterpret_cast<const char*>(base)[host_off];
+      dst[i] = c;
+      if (!c) break;
+    }
+  };
+  char title[128] = {};
+  read_guest_str(ctx.r3.u32, title, sizeof(title), true);
+  // Detail: the hook runs BEFORE sub_8241BBF0's own prologue, so ctx.r1 is still the CALLER's
+  // (sub_8241BD28's) r1, and sub_8360ED78 sprintf'd into [r1+80] of that same frame. Inline text.
+  char detail[256] = {};
+  read_guest_str(ctx.r1.u32 + 80u, detail, sizeof(detail), false);
+  REXLOG_WARN("[dbg] IN  sub8241BBF0 r3={:08X} r4={:08X} lr={:08X} title='{}' detail='{}'", ctx.r3.u32,
+              ctx.r4.u32, static_cast<uint32_t>(ctx.lr), title, detail);
+  __imp__sub_8241BBF0(ctx, base);
+  return;
+}
+
+// The detail formatter behind the dirty-disc message: sub_8360ED78(dest, fmt, arg). Log the format
+// string (image) and what landed in dest.
+REX_EXTERN(__imp__sub_8360ED78);
+REX_HOOK_RAW(sub_8360ED78) {
+  const uint32_t dest = ctx.r3.u32;
+  const uint32_t fmt = ctx.r4.u32;
+  auto rdstr = [&](uint32_t addr, char* dst, size_t cap) {
+    if (addr < 0x82000000u || addr >= 0x84000000u) return;
+    for (size_t i = 0; i < cap - 1; ++i) {
+      const uint32_t a = addr + uint32_t(i);
+      const char c = reinterpret_cast<const char*>(base)[a];
+      dst[i] = c;
+      if (!c) break;
+    }
+  };
+  char fmtstr[160] = {};
+  rdstr(fmt, fmtstr, sizeof(fmtstr));
+  const int n = g_clobbers.fetch_add(1) + 1;
+  if (n <= 8) {
+    REXLOG_WARN("[dbg] IN  fmt8360ED78 #{} dest={:08X} fmt={:08X}('{:.100}') r5={:08X}", n, dest, fmt,
+                fmtstr, ctx.r5.u32);
+  }
+  __imp__sub_8360ED78(ctx, base);
+  if (n <= 8) {
+    // Dest is caller stack (mapped): read back what was formatted.
+    char out[192] = {};
+    for (size_t i = 0; i < sizeof(out) - 1; ++i) {
+      const uint32_t a = dest + uint32_t(i);
+      const char c = reinterpret_cast<const char*>(base)[a];
+      out[i] = c;
+      if (!c) break;
+    }
+    REXLOG_WARN("[dbg] OUT fmt8360ED78 #{} dest='{}' r3={:08X}", n, out, ctx.r3.u32);
+  }
+  return;
+}
+
+// What sub_83658240 writes to its out-param [r8]. sub_8241BBF0 shows dirty-disc when [r1+80] is 0
+// after this call; the first thing the callee does is zero it, so the question is whether anything
+// writes it back before returning.
+REX_EXTERN(__imp__sub_83658240);
+REX_HOOK_RAW(sub_83658240) {
+  const uint32_t out = ctx.r8.u32;
+  const int n = g_clobbers.fetch_add(1) + 1;
+  if (n <= 12) {
+    REXLOG_WARN("[dbg] IN  sub83658240 #{} r3={:08X} r4={:08X} r6={:08X} out=[{:08X}] lr={:08X}", n,
+                ctx.r3.u32, ctx.r4.u32, ctx.r6.u32, out, static_cast<uint32_t>(ctx.lr));
+  }
+  __imp__sub_83658240(ctx, base);
+  if (n <= 12) {
+    REXLOG_WARN("[dbg] OUT sub83658240 #{} [out]={:08X} r3={:08X}", n, GuestLoad32(base, out),
+                ctx.r3.u32);
+  }
+  return;
+}

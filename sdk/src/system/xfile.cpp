@@ -102,6 +102,41 @@ X_STATUS XFile::QueryDirectory(X_FILE_DIRECTORY_INFORMATION* out_info, size_t le
   return X_STATUS_SUCCESS;
 }
 
+namespace {
+// Real hardware has every physical address backed by RAM, allocated or not: a file transfer into
+// never-allocated physical lands in real memory (fc3-nx: the game stages audio probes in scratch
+// physical, e.g. reading sound_english.fat into 0xF90C9D40). The SDK is stricter and fails those
+// with C5, which the game shows as a dirty disc. This materializes the host pages on demand so the
+// transfer proceeds exactly like hardware; the guest page table is untouched, so GPU watches
+// (ReadOnly, still fail) and memory probes keep their exact semantics. Returns false when the range
+// must still fail (watched pages, out of range, commit failed).
+bool CommitPhysicalForTransfer(rex::memory::Memory* mem, rex::memory::PhysicalHeap* heap,
+                               uint32_t guest_address, uint32_t length) {
+  if (!length) {
+    return true;
+  }
+  const uint32_t end_address = guest_address + length - 1;
+  if (mem->LookupHeap(guest_address) != heap || mem->LookupHeap(end_address) != heap) {
+    return false;  // crosses into another heap: not ours to materialize
+  }
+  if (heap->QueryRangeAccess(guest_address, end_address) != rex::memory::PageAccess::kNoAccess) {
+    return false;  // committed (possibly watched): keep the existing behavior
+  }
+  constexpr uint32_t kPage = 0x1000;
+  const uint32_t start = guest_address & ~(kPage - 1);
+  const uint64_t end64 = (uint64_t(guest_address) + length + kPage - 1) & ~(uint64_t)(kPage - 1);
+  if (end64 <= start || end64 - start > 0x1000000) {
+    return false;  // empty or absurdly large: do not materialize
+  }
+  const uint32_t phys = heap->GetPhysicalAddress(start);
+  uint8_t* host = mem->TranslatePhysical(phys);
+  void* p = rex::memory::AllocFixed(host, size_t(end64 - start),
+                                    rex::memory::AllocationType::kCommit,
+                                    rex::memory::PageAccess::kReadWrite);
+  return p != nullptr;
+}
+}  // namespace
+
 X_STATUS XFile::Read(uint32_t buffer_guest_address, uint32_t buffer_length, uint64_t byte_offset,
                      uint32_t* out_bytes_read, uint32_t apc_context, bool notify_completion) {
   std::lock_guard<std::mutex> lock(file_lock_);
@@ -123,6 +158,8 @@ X_STATUS XFile::ReadInternal(uint32_t buffer_guest_address, uint32_t buffer_leng
   // tests.
   if (buffer_length) {
     if (UINT32_MAX - buffer_guest_address < buffer_length) {
+      // TEMP DIAG: silent wraparound failure. Remove once answered.
+      REXLOG_WARN("[readchk] WRAP buf={:08X} len={:X}", buffer_guest_address, buffer_length);
       result = X_STATUS_ACCESS_VIOLATION;
     } else {
       // Games often read directly to texture/vertex buffer memory - in this
@@ -155,7 +192,14 @@ X_STATUS XFile::ReadInternal(uint32_t buffer_guest_address, uint32_t buffer_leng
                 : nullptr;
         if (buffer_physical_heap && buffer_physical_heap->QueryRangeAccess(
                                         buffer_guest_address, buffer_guest_high_address) !=
-                                        memory::PageAccess::kReadWrite) {
+                                        memory::PageAccess::kReadWrite &&
+            !CommitPhysicalForTransfer(memory(), buffer_physical_heap, buffer_guest_address,
+                                       buffer_length)) {
+          // TEMP DIAG: silent physical-access failure. Remove once answered.
+          REXLOG_WARN("[readchk] PHYS buf={:08X} len={:X} access={}", buffer_guest_address,
+                      buffer_length,
+                      (int)buffer_physical_heap->QueryRangeAccess(buffer_guest_address,
+                                                                 buffer_guest_high_address));
           result = X_STATUS_ACCESS_VIOLATION;
         } else {
           result = file_->ReadSync(
@@ -166,6 +210,11 @@ X_STATUS XFile::ReadInternal(uint32_t buffer_guest_address, uint32_t buffer_leng
                       : memory()->TranslateVirtual(buffer_guest_address),
                   buffer_length),
               size_t(byte_offset), &bytes_read);
+          // TEMP DIAG (fc3-nx, 2026-10-12): result right out of ReadSync. Remove once answered.
+          if (XFAILED(result)) {
+            REXLOG_WARN("[readfail2] ReadSync {:#x} buf={:08X} len={:X} off={}", result,
+                        buffer_guest_address, buffer_length, byte_offset);
+          }
           if (XSUCCEEDED(result)) {
             if (buffer_physical_heap) {
               buffer_physical_heap->TriggerCallbacks(

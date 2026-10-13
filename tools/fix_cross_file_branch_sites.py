@@ -23,7 +23,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GEN = os.path.join(ROOT, 'app', 'generated')
 
-WRAPPER_RE = re.compile(r'^void\s+fc3_label_([0-9A-Fa-f]+)\s*\(PPCContext&', re.M)
+WRAPPER_RE = re.compile(r'^(?:extern "C" )?void\s+fc3_label_([0-9A-Fa-f]+)\s*\(PPCContext&', re.M)
 
 
 def main():

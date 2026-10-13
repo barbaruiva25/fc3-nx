@@ -28,7 +28,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GEN = os.path.join(ROOT, 'app', 'generated')
 
-WRAPPER_START = re.compile(r'^void\s+(fc3_label_[0-9A-Fa-f]+)\s*\(PPCContext& __restrict ctx, uint8_t\* base\)\s*\{\s*$')
+WRAPPER_START = re.compile(r'^(?:extern "C" )?void\s+(fc3_label_[0-9A-Fa-f]+)\s*\(PPCContext& __restrict ctx, uint8_t\* base\)\s*\{\s*$')
 FUNC_START = re.compile(r'^DEFINE_REX_FUNC\(')
 
 
