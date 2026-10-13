@@ -282,3 +282,28 @@ REX_HOOK_RAW(sub_8363CE50) {
   }
   return;
 }
+
+// ---------------------------------------------------------------------------------------------
+// SWITCH CRASH: sub_8365D018 (2026-10-12)
+//
+// On Switch the game dies writing [r31+..] in sub_8365D018 (guest heap, uncommitted page).
+// This hook answers whether the PC build even reaches it, and with which r3/r4. If the PC never
+// calls it, the Switch diverged before; if it does with the same shape, the divergence is in the
+// Switch commit path.
+// ---------------------------------------------------------------------------------------------
+REX_EXTERN(__imp__sub_8365D018);
+REX_HOOK_RAW(sub_8365D018) {
+  const int n = g_b1c0_calls.fetch_add(1) + 1;
+  if (n <= 12) {
+    REXLOG_WARN("[dbg] IN  sub_8365D018 #{} r3={:08X} r4={:08X} lr={:08X}", n, ctx.r3.u32,
+                ctx.r4.u32, static_cast<uint32_t>(ctx.lr));
+  }
+  __imp__sub_8365D018(ctx, base);
+  if (n <= 12) {
+    REXLOG_WARN("[dbg] OUT sub_8365D018 #{} r3={:08X}", n, ctx.r3.u32);
+  }
+  return;
+}
+
+// (XamShowDirtyDiscErrorUI hook removido: REX_HOOK_RAW so atua em funcoes do guest, nao em exports
+// do kernel. O chamador e registrado direto em sdk/src/kernel/xam/am_ui.cpp como [dirtycaller].)

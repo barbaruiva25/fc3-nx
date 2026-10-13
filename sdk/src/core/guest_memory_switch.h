@@ -163,6 +163,11 @@ size_t RexGmCommittedBytes(void);
  * Each line: "commit[ago]: offset=0x... len=0x... ok|fail(0x...)". */
 size_t RexGmCommitHistory(char* out, size_t cap);
 
+/* Whether any committed chunk covers a mapping offset (vs never committed). For the fatal crash
+ * report: prot=0 is ambiguous between "never committed" and "committed then protected NONE"
+ * (freed memory); this separates them. */
+bool RexGmIsCommitted(size_t offset);
+
 /* Number of committed chunks (each is a code alias and up to one mapping per view). */
 size_t RexGmChunkCount(void);
 

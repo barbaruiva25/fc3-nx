@@ -591,9 +591,10 @@ extern "C" void RexSwitchCrashLog(const char* reason, const ThreadExceptionDump*
       RexGmAccess acc = REX_GM_NONE;
       const bool has_prot =
           RexGmQueryProtect(reinterpret_cast<uint8_t*>(ctx->far.x), &plen, &acc);
-      Append(b, "gm: in_view=%d offset=0x%zx prot=%d(%s) lastresult=0x%08x "
+      Append(b, "gm: in_view=%d offset=0x%zx prot=%d(%s) chunk=%d lastresult=0x%08x "
              "committed=%zuMB chunks=%zu mapped=%zuMB(incl_mirrors)\n",
              in_view ? 1 : 0, gm_off, (int)acc, has_prot ? "yes" : "no",
+             in_view ? (RexGmIsCommitted(gm_off) ? 1 : 0) : -1,
              RexGmLastResult(), RexGmCommittedBytes() >> 20, RexGmChunkCount(),
              RexGmMappedBytes() >> 20);
     }

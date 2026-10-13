@@ -475,6 +475,12 @@ uint32_t RexGmLastResult(void) {
     return s.last_result;
 }
 
+bool RexGmIsCommitted(size_t offset) {
+    State& s = S();
+    std::lock_guard<std::mutex> lock(s.mutex);
+    return ChunkAt(s, offset) != nullptr;
+}
+
 size_t RexGmCommitHistory(char* out, size_t cap) {
     State& s = S();
     std::lock_guard<std::mutex> lock(s.mutex);

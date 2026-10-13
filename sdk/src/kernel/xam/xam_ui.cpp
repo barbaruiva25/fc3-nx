@@ -519,6 +519,13 @@ u32 XamShowDeviceSelectorUI_entry(u32 user_index, u32 content_type, u32 content_
 void XamShowDirtyDiscErrorUI_entry(u32 user_index) {
   REXKRNL_ERROR("XamShowDirtyDiscErrorUI called! user_index={}", uint32_t(user_index));
   REXKRNL_ERROR("This indicates a disc/file read error - check that all game files exist");
+  // TEMP DIAG (fc3-nx): who called. The boot is non-deterministic (each run fails at a different
+  // read), so the caller identifies the real failing check. Remove once answered.
+  {
+    PPCContext* ppc = rex::runtime::current_ppc_context();
+    REXKRNL_ERROR("[dirtycaller] lr={:08X} r3={:08X} r4={:08X}", ppc ? static_cast<uint32_t>(ppc->lr) : 0,
+                  ppc ? ppc->r3.u32 : 0, ppc ? ppc->r4.u32 : 0);
+  }
 
   const Runtime* emulator = REX_KERNEL_STATE()->emulator();
   ui::ImGuiDrawer* imgui_drawer = emulator->imgui_drawer();

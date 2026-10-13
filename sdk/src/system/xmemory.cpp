@@ -1524,6 +1524,13 @@ bool BaseHeap::AllocFixed(uint32_t base_address, uint32_t size, uint32_t alignme
       REXSYS_ERROR("BaseHeap::AllocFixed failed to alloc range from host");
       return false;
     }
+    // TEMP DIAG (fc3-nx, 2026-10-12): every host commit with its guest address, to compare PC vs
+    // Switch heap-commit coverage. The Switch dies touching virtual-heap pages that were never
+    // committed; this shows whether the PC commits them. Remove once answered.
+    REXLOG_WARN("[commit] heap={:08X} guest={:08X} size={:X} {}", heap_base_,
+                heap_base_ + (start_page_number << page_size_shift_),
+                page_count << page_size_shift_,
+                (allocation_type & memory::kMemoryAllocationCommit) ? "COMMIT" : "reserve");
   }
 
   // Set page state.

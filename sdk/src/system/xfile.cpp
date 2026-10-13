@@ -144,6 +144,9 @@ X_STATUS XFile::ReadInternal(uint32_t buffer_guest_address, uint32_t buffer_leng
               (buffer_end_heap->heap_type() == memory::HeapType::kGuestPhysical) ||
           (buffer_start_heap->heap_type() == memory::HeapType::kGuestPhysical &&
            buffer_start_heap != buffer_end_heap)) {
+        // TEMP DIAG (fc3-nx, 2026-10-12): which reads fail the heap check and why. Remove once answered.
+        REXLOG_WARN("[readchk] FAIL buf={:08X} len={:X} startheap={} endheap={}", buffer_guest_address,
+                    buffer_length, (void*)buffer_start_heap, (void*)buffer_end_heap);
         result = X_STATUS_ACCESS_VIOLATION;
       } else {
         rex::memory::PhysicalHeap* buffer_physical_heap =
