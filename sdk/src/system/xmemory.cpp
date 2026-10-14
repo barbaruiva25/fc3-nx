@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cstring>
 #include <utility>
+#include <vector>
 
 #if REX_PLATFORM_MAC
 #include <sys/mman.h>
@@ -1534,6 +1535,22 @@ bool BaseHeap::AllocFixed(uint32_t base_address, uint32_t size, uint32_t alignme
   }
 
   // Set page state.
+  // fc3-nx: snapshot runs newly transitioning to committed; they are zeroed after
+  // SyncHostPageAccess below (Xbox serves zeroes for fresh commits; the host mapping is
+  // never released, so without this a recommit serves stale bytes).
+  std::vector<std::pair<uint32_t, uint32_t>> fresh_runs;
+  if (allocation_type & memory::kMemoryAllocationCommit) {
+    for (uint32_t page_number = start_page_number; page_number <= end_page_number; ++page_number) {
+      if (!(page_table_[page_number].state & memory::kMemoryAllocationCommit)) {
+        if (!fresh_runs.empty() &&
+            fresh_runs.back().first + fresh_runs.back().second == page_number) {
+          fresh_runs.back().second++;
+        } else {
+          fresh_runs.emplace_back(page_number, 1);
+        }
+      }
+    }
+  }
   for (uint32_t page_number = start_page_number; page_number <= end_page_number; ++page_number) {
     auto& page_entry = page_table_[page_number];
     if (allocation_type & memory::kMemoryAllocationReserve) {
@@ -1551,6 +1568,16 @@ bool BaseHeap::AllocFixed(uint32_t base_address, uint32_t size, uint32_t alignme
 
   if (!SyncHostPageAccess(start_page_number, end_page_number)) {
     return false;
+  }
+
+  // fc3-nx: zero freshly committed runs (Xbox semantics; see snapshot above). Already-live
+  // pages are untouched. Gated like scribble: only host-writable commits are memset here.
+  if ((allocation_type & memory::kMemoryAllocationCommit) &&
+      (protect & memory::kMemoryProtectWrite)) {
+    for (const auto& run : fresh_runs) {
+      std::memset(TranslateRelative(run.first << page_size_shift_), 0,
+                  run.second << page_size_shift_);
+    }
   }
 
   if (allocation_type != memory::kMemoryAllocationReserve && REXCVAR_GET(scribble_heap) &&
@@ -1698,6 +1725,20 @@ bool BaseHeap::AllocRange(uint32_t low_address, uint32_t high_address, uint32_t 
   }
 
   // Set page state.
+  // fc3-nx: snapshot runs newly transitioning to committed (see AllocFixed).
+  std::vector<std::pair<uint32_t, uint32_t>> fresh_runs;
+  if (allocation_type & memory::kMemoryAllocationCommit) {
+    for (uint32_t page_number = start_page_number; page_number <= end_page_number; ++page_number) {
+      if (!(page_table_[page_number].state & memory::kMemoryAllocationCommit)) {
+        if (!fresh_runs.empty() &&
+            fresh_runs.back().first + fresh_runs.back().second == page_number) {
+          fresh_runs.back().second++;
+        } else {
+          fresh_runs.emplace_back(page_number, 1);
+        }
+      }
+    }
+  }
   for (uint32_t page_number = start_page_number; page_number <= end_page_number; ++page_number) {
     auto& page_entry = page_table_[page_number];
     if (!page_entry.state) {
@@ -1712,6 +1753,16 @@ bool BaseHeap::AllocRange(uint32_t low_address, uint32_t high_address, uint32_t 
 
   if (!SyncHostPageAccess(start_page_number, end_page_number)) {
     return false;
+  }
+
+  // fc3-nx: zero freshly committed runs (Xbox semantics; see snapshot above). Already-live
+  // pages are untouched. Gated like scribble: only host-writable commits are memset here.
+  if ((allocation_type & memory::kMemoryAllocationCommit) &&
+      (protect & memory::kMemoryProtectWrite)) {
+    for (const auto& run : fresh_runs) {
+      std::memset(TranslateRelative(run.first << page_size_shift_), 0,
+                  run.second << page_size_shift_);
+    }
   }
 
   if (allocation_type != memory::kMemoryAllocationReserve && REXCVAR_GET(scribble_heap) &&
