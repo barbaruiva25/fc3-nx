@@ -31,10 +31,27 @@ std::atomic<uint8_t*> g_watch_page{nullptr};
 std::atomic<int> g_watch_hits{0};
 std::atomic<int> g_watch_logs{0};
 std::atomic<bool> g_watch_done{false};
+std::atomic<bool> g_watch_stepping{false};
 void* g_watch_handle = nullptr;
 
+constexpr DWORD kSingleStep = 0x80000004u;  // EXCEPTION_SINGLE_STEP
+
 LONG CALLBACK WatchHandler(EXCEPTION_POINTERS* info) {
-  if (info->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION) {
+  const DWORD code = info->ExceptionRecord->ExceptionCode;
+  if (code == kSingleStep) {
+    // Our own single step after a watched hit: re-arm and go on.
+    if (!g_watch_stepping.exchange(false)) {
+      return EXCEPTION_CONTINUE_SEARCH;
+    }
+    info->ContextRecord->EFlags &= ~DWORD(0x100);
+    uint8_t* page = g_watch_page.load();
+    if (page && !g_watch_done.load()) {
+      DWORD old = 0;
+      VirtualProtect(page, 4096, PAGE_NOACCESS, &old);
+    }
+    return EXCEPTION_CONTINUE_EXECUTION;
+  }
+  if (code != EXCEPTION_ACCESS_VIOLATION) {
     return EXCEPTION_CONTINUE_SEARCH;
   }
   uint8_t* page = g_watch_page.load();
@@ -89,10 +106,11 @@ LONG CALLBACK WatchHandler(EXCEPTION_POINTERS* info) {
                       kBadRaw);
     }
     rex::FlushLogging();
-    return EXCEPTION_CONTINUE_EXECUTION;  // re-execute the write, now unprotected
+    return EXCEPTION_CONTINUE_EXECUTION;  // re-execute the access, now unprotected
   }
-  DWORD old2 = 0;
-  VirtualProtect(page, 4096, PAGE_NOACCESS, &old2);
+  // Re-arm AFTER the access re-executes: single-step over it, re-protect on the step.
+  g_watch_stepping.store(true);
+  info->ContextRecord->EFlags |= DWORD(0x100);
   return EXCEPTION_CONTINUE_EXECUTION;
 }
 

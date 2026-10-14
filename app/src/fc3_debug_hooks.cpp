@@ -191,7 +191,26 @@ FC3_TRACE_CALLEE(sub_83611CD0, 14)  // the heap's invalid-pointer handler
 FC3_TRACE_CALLEE(sub_82405188, 8)
 FC3_TRACE_CALLEE(sub_82412EE8, 9)
 FC3_TRACE_CALLEE(sub_82412D40, 10)
-FC3_TRACE_CALLEE(sub_8240D130, 11)
+// sub_8240D130: manual hook (same log format as the macro) that also arms the F90CAA20
+// write watch when the deterministic corrupt node comes out of the pool allocator.
+REX_EXTERN(__imp__sub_8240D130);
+REX_HOOK_RAW(sub_8240D130) {
+  const int n = g_callee[11].fetch_add(1) + 1;
+  const bool log = n < kMaxLogs;
+  if (log) {
+    REXLOG_WARN("[dbg] IN  {} #{} from lr={:08X} r3={:08X} r4={:08X} r5={:08X}", "sub_8240D130",
+                n, static_cast<uint32_t>(ctx.lr), ctx.r3.u32, ctx.r4.u32, ctx.r5.u32);
+  }
+  __imp__sub_8240D130(ctx, base);
+  if (log) {
+    REXLOG_WARN("[dbg] OUT {} #{} r3={:08X}", "sub_8240D130", n, ctx.r3.u32);
+  }
+  if (ctx.r3.u32 == 0xF90CAA20u) {
+    REXLOG_WARN("[dbg] alloc40988: node={:08X}, arming watch", ctx.r3.u32);
+    Fc3ArmNodeWatch(base, ctx.r3.u32);
+  }
+  return;
+}
 FC3_TRACE_CALLEE(sub_8240B778, 12)
 FC3_TRACE_CALLEE(sub_824053B8, 15)
 
