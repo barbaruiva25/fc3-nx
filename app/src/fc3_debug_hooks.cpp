@@ -13,8 +13,17 @@
 #include <rex/hook.h>
 #include <rex/logging.h>
 
-// One-shot write watch for the corruptible node (defined in fc3_crash_log.cpp).
+// One-shot write watch for the corruptible node (defined in fc3_crash_log.cpp on
+// Windows; no-op stub elsewhere so the Switch build links).
 void Fc3ArmNodeWatch(uint8_t* host_base, uint32_t guest_addr);
+#if !defined(_WIN32)
+namespace {
+struct Fc3WatchStub {
+  static void Arm(uint8_t*, uint32_t) {}
+};
+}  // namespace
+#define Fc3ArmNodeWatch Fc3WatchStub::Arm
+#endif
 
 // ---------------------------------------------------------------------------------------------
 // CRASH UNDER INVESTIGATION: out\pc\logs\fc3_002.log onwards (2026-10-10)
@@ -413,6 +422,48 @@ REX_HOOK_RAW(sub_8360ED78) {
     }
     REXLOG_WARN("[dbg] OUT fmt8360ED78 #{} dest='{}' r3={:08X}", n, out, ctx.r3.u32);
   }
+  return;
+}
+
+// The RB maintainer behind the vec crash (fc3_062/063/064/065): sub_829EF010 recolored
+// node F90CAA20's byte+5 (00->02) via `stb r11,5(r31)` with r31=node (watch-proven, writer
+// PC + guest_lr 0x829EF018). Entry args (r3/r4/r5 -> r30/r31/r29) say which object it was
+// told to fix: right object + right write = vec model wrong; wrong object = hunt one up.
+REX_EXTERN(__imp__sub_829EF010);
+REX_HOOK_RAW(sub_829EF010) {
+  static std::atomic<int> n_rb{0};
+  const int n = n_rb.fetch_add(1) + 1;
+  if (n <= 25) {
+    // [r4] is the chain head this call walks (0x40 heap, mapped: the callee reads it
+    // first thing). The corrupting call is the one whose chain holds F90CAA20.
+    const uint32_t slot = ctx.r4.u32;
+    uint32_t head = 0;
+    bool has_head = false;
+    if (slot >= 0x40000000u && slot < 0x80000000u) {
+      head = GuestLoad32(base, slot);
+      has_head = true;
+    }
+    REXLOG_WARN("[dbg] IN  rbF010 #{} r3={:08X} slot(r4)={:08X} [slot]={:08X}({}) r5={:08X} "
+                "lr={:08X}",
+                n, ctx.r3.u32, slot, head, has_head, ctx.r5.u32,
+                static_cast<uint32_t>(ctx.lr));
+  }
+  __imp__sub_829EF010(ctx, base);
+  return;
+}
+
+// The rbF010 calls all come from one loop in sub_829EF5D0 (bl with lr=0x829EF724).
+// (0x829EF724 itself is a return address inside it, not a function entry: hooking it
+// breaks the link.) This hook names the array owner and bounds.
+REX_EXTERN(__imp__sub_829EF5D0);
+REX_HOOK_RAW(sub_829EF5D0) {
+  static std::atomic<int> n_rbloop{0};
+  const int n = n_rbloop.fetch_add(1) + 1;
+  if (n <= 10) {
+    REXLOG_WARN("[dbg] IN  rbLOOP #{} r3={:08X} r4={:08X} r5={:08X} lr={:08X}", n, ctx.r3.u32,
+                ctx.r4.u32, ctx.r5.u32, static_cast<uint32_t>(ctx.lr));
+  }
+  __imp__sub_829EF5D0(ctx, base);
   return;
 }
 
