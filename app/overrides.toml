@@ -14,6 +14,20 @@
 #   setjmp_address / longjmp_address    the CRT's setjmp and longjmp; without them r1/r31 come back corrupted
 #                                       after a call that returns through longjmp
 #
+# setjmp/longjmp, confirmed 2026-10-13 by shape (saver vs mirrored restore) in
+# out/default_image.bin, independent of any other game (sa2-notes.md documents the same
+# class with the same crash signature: r1/r31 corrupted after a call returns):
+#   setjmp 0x83615650: stub (lis/lwz/cmpwi/mtctr/bnectr) falling through to the saver at
+#     0x83615664 (mflr r0, mfcr, stfd f14-f31 at 0x8361566C-0x836156B0, std r13-r31 at
+#     0x836156B4-0x836156FC, stvx VMX block to 0x836158FC, stw r0/std r1/li r3,0/blr at
+#     0x83615900-0x83615918). 9 call sites in app/generated/default (e.g.
+#     fc3_recomp.130.cpp:25796). Registered address is the function start 0x83615650.
+#   longjmp 0x83615920 (generated as sub_83615920): mirrored restore (lfd f14-f31 at
+#     0x8361595C-0x836159A0, ld r13-r31 at 0x836159A4-0x836159EC, VMX loads to
+#     0x83615BEC, mtlr/mtcrf/mr r3,r6/blr at 0x83615BF0-0x83615C08) via helper 0x836224D0.
+setjmp_address = 0x83615650
+longjmp_address = 0x83615920
+#
 # Known shapes to look for, from the guide (chapter 3.2):
 #   - functions reached only through pointers (CRT initializer tables, vtables, callbacks built with lis/addi)
 #   - truncated jump tables ("Switch case out of range" / illegal instruction)
