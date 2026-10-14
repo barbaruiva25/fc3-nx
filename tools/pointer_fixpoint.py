@@ -37,7 +37,9 @@ GEN = os.path.join(APP, 'generated', 'default')
 MANIFEST = os.path.join(APP, 'fc3_manifest.toml')
 OVERRIDES = os.path.join(APP, 'overrides.toml')
 IMAGE_BASE = 0x82000000
-CODE_LO, CODE_HI = 0x82120000, 0x82970600  # set from the generated tree in main()
+CODE_LO, CODE_HI = 0x82120000, 0x82970600  # fallback only; code_range() below reads
+# the real range (fc3: code 82340000-83DF2AF4 per boot log) — the generated init carries
+# REX_CODE_BASE/REX_CODE_SIZE macros instead of literals, so parse those first.
 
 gc = {'__name__': 'gc'}
 exec(compile(open(os.path.join(TOOLS, 'gap_classify.py')).read(), 'gc', 'exec'), gc)
@@ -54,13 +56,23 @@ def find_rexglue():
 
 
 def code_range():
-    # The SDK writes the code range into the generated init file (PPCImageConfig).
+    # The SDK writes the code range into the generated PCH (defines, not literals).
+    try:
+        text = open(os.path.join(GEN, 'fc3_pch.h'), errors='replace').read()
+        base = re.search(r'#define\s+REX_CODE_BASE\s+0x([0-9A-Fa-f]+)', text)
+        size = re.search(r'#define\s+REX_CODE_SIZE\s+0x([0-9A-Fa-f]+)', text)
+        if base and size:
+            lo = int(base.group(1), 16)
+            return lo, lo + int(size.group(1), 16)
+    except OSError:
+        pass
+    # Legacy literal form, then the stale fallback (fc3 code is 82340000-83DF2AF4).
     text = open(os.path.join(GEN, 'fc3_init.cpp'), errors='replace').read()
     base = re.search(r'code_base\s*=\s*0x([0-9A-Fa-f]+)', text)
     size = re.search(r'code_size\s*=\s*0x([0-9A-Fa-f]+)', text)
     if base and size:
         return int(base.group(1), 16), int(base.group(1), 16) + int(size.group(1), 16)
-    return 0x82120000, 0x82970600  # from the runtime log of the first boot
+    return 0x82340000, 0x83DF2B00  # fc3 default.xex, from the runtime log of the first boot
 
 
 def read_gaps(scratch):

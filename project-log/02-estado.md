@@ -1,4 +1,21 @@
-# 02 — Estado atual (2026-10-13, manha; sessao com codegen+boot em loop)
+# 02 — Estado atual (2026-10-14, 00:30; rodada grande com setjmp+fixpoint)
+
+## O que funciona (atualizado)
+
+- Codegen: 883 -> ~1174 funcoes (46 arquivos reescritos na rodada setjmp; +291 do fixpoint).
+- `pointer_fixpoint.py`: corrigido para o range real (lia fallback defasado; agora parseia
+  `REX_CODE_BASE/SIZE` do PCH) — pass 1: 317 candidatos, 291 aceitos, fixpoint convergiu no
+  pass 2. `app/overrides.toml` com 444 entradas.
+- `switch_check.py` (primeira vez): 0 truncadas, 0 erradas, 0 perdidas (classe limpa).
+- `pointer_audit.py` (primeira vez): 10 vtable-like + 11 built-in-code pendentes de revisao.
+- `setjmp 0x83615650` / `longjmp 0x83615920` registrados (shape confirmado) — sem efeito
+  neste crash (classe diferente, registro correto pelo guia).
+- SDK: paginas recem-comitadas agora zeradas (semantica Xbox) — sem efeito neste crash
+  (hipotese stale descartada para este bug com evidencia: crash identico com heap zerado).
+- Watchpoint com single-step funcional: escritor do `w1=0x04020000` pego em flagrante —
+  `sub_829EF010` (`stb` do byte de cor +5 do no, recoloracao de RB aparentemente legitima).
+  Guspe: o no e da propria arvore (link valido); o vec le `[x+4]`-como-link e quebra.
+  Proxima pergunta: entradas do mantenedor (r3/r28) ou invariante a montante.
 
 ## O que funciona
 
