@@ -1,4 +1,19 @@
-# 02 — Estado atual (2026-10-14, 00:30; rodada grande com setjmp+fixpoint)
+# 02 — Estado atual (2026-10-14, 01:10; fechamento da noite)
+
+## O que funciona (atualizado)
+
+- NRO RELINKADO com o codigo atual (`out/nx/fc3.nro`, 14/10 01:00, 170,7 MB).
+  Unico problema de link foi `Fc3ArmNodeWatch` (Windows-only) — stub no-op no Switch.
+- Switch testado pelo usuario via DBI: SD verificado OK; crash e o mesmo do PC.
+- Pista nova e forte para a proxima sessao (lida em `sdk/src/system/xfile.cpp:106-112`,
+  descoberta de sessao anterior): o jogo faz leituras de arquivo para scratch fisico
+  (ex. `sound_english.fat` -> `0xF90C9D40`) e o SDK materializa paginas host on demand
+  para isso — SEM zerar e fora do caminho de commit guest. A pagina do no (F90CAxxx)
+  divide a regiao com esse scratch. Hipotese: file-read (memcpy host-direct, sem AV,
+  invisivel ao watch) escreve bytes de arquivo ("load"+A3) por cima de blocos do pool —
+  ou o pool entrega blocos sobrepostos ao scratch. Teste: logar reads com destino em
+  F90Cxxxx perto do crash; checar se o commit de F90CA000 veio por transferencia
+  (sem zero) ou por commit guest (com zero pelo fix de hoje).
 
 ## O que funciona (atualizado)
 
