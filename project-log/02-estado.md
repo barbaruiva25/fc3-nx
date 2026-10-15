@@ -16,6 +16,12 @@
   `sub_829EF010` (`stb` do byte de cor +5 do no, recoloracao de RB aparentemente legitima).
   Guspe: o no e da propria arvore (link valido); o vec le `[x+4]`-como-link e quebra.
   Proxima pergunta: entradas do mantenedor (r3/r28) ou invariante a montante.
+- SWITCH (14/10, NRO novo com hooks): `switch/fc3-nx` no SD verificado via DBI/MTP
+  (NRO + game_root completo + update/patch.dat+fat + toml com update_data_root + logs OK).
+  Crash no console E O MESMO do PC, instrucao por instrucao: `sub_82386818`
+  (`fc3_recomp.173.cpp:308`, simbolizado no ELF AArch64), caller `sub_82389218`
+  (`fc3_recomp.354.cpp:341`), guest `0x0502FF08`, key `0x0D`, lr guest `0x82373B90`.
+  Causa raiz deterministica cross-platform; nao e problema de arquivo no SD.
 
 ## O que funciona
 
