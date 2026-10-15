@@ -15,6 +15,9 @@
   de ponteiros). O NRO precisa do mesmo tratamento ate o fix real.
 - Proximos: boot longo (180 s, rodando) para ver ate onde vai (menu? video? proximo
   crash?); depois trocar o patch por fix real ou mante-lo documentado como workaround.
+- **BOOT LONGO CONFIRMADO (fc3_073.log, 180 s): jogo estavel, sem FATAL/crash/dirty-disc,**
+  **audio perfeito (1875 frames/10 s, 0 silencio), 205 s de CPU.** Captura de video em
+  andamento para ver a tela (menu?).
 
 ## O que funciona (atualizado)
 
