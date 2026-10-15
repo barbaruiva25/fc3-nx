@@ -1,4 +1,20 @@
-# 02 — Estado atual (2026-10-14, 01:10; fechamento da noite)
+# 02 — Estado atual (2026-10-14, 22:35; BREAKTHROUGH: boot passa do init de conteudo)
+
+## O que funciona (atualizado)
+
+- **BOOT PASSA DO CRASH DO VETOR.** Patch cirurgico temporario no hook `vec85378`
+  (`[F90CAA20+4] := 0` na entrada da chamada #18): `PATCHED [F90CAA20+4]: 00000204 -> 0`
+  e o jogo ANDA — 45 s rodando com 51 s de CPU (multithread ocupado), 808 MB, commits
+  de 1,5 MB (`F2xxx size=180000`), AUDIO TOCANDO (1875 frames/10 s SDL, dado real).
+  Antes: crash deterministico ha 15+ ciclos no mesmo ponto.
+- O que isso prova: UM elo ruim bloqueava o boot; arvore, manager, mantenedor e vec
+  estao corretos. O `w1=0x04020000` = byte+4 `0x04` (tag/comprimento pre-existente,
+  nunca escrito em janela) + byte+5 `0x02` (recolor legitimo do mantenedor).
+  Origem do byte+4 ainda aberta (CANDIDATO: `stw r31,4(r11)` do criador com
+  comprimento 4 = string "load" — no string com tag/comprimento linkado numa cadeia
+  de ponteiros). O NRO precisa do mesmo tratamento ate o fix real.
+- Proximos: boot longo (180 s, rodando) para ver ate onde vai (menu? video? proximo
+  crash?); depois trocar o patch por fix real ou mante-lo documentado como workaround.
 
 ## O que funciona (atualizado)
 

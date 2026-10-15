@@ -436,6 +436,8 @@ REX_HOOK_RAW(sub_829EF010) {
   if (n <= 25) {
     // [r4] is the chain head this call walks (0x40 heap, mapped: the callee reads it
     // first thing). The corrupting call is the one whose chain holds F90CAA20.
+    // r28=[r3+16] feeds the recolor (lbz r11,20(r28) xor 3 ... stb color): stale manager
+    // bytes here explain a wrong color. Both read by the callee itself, so mapped.
     const uint32_t slot = ctx.r4.u32;
     uint32_t head = 0;
     bool has_head = false;
@@ -443,9 +445,21 @@ REX_HOOK_RAW(sub_829EF010) {
       head = GuestLoad32(base, slot);
       has_head = true;
     }
+    const uint32_t mgr = ctx.r3.u32;
+    uint32_t r28v = 0, b20 = 0;
+    bool has_mgr = false;
+    if (mgr >= 0x40000000u && mgr < 0x80000000u) {
+      r28v = GuestLoad32(base, mgr + 16);
+      has_mgr = true;
+      if (r28v >= 0x40000000u && r28v < 0x80000000u) {
+        b20 = reinterpret_cast<const uint8_t*>(base)[r28v];
+      } else {
+        has_mgr = false;
+      }
+    }
     REXLOG_WARN("[dbg] IN  rbF010 #{} r3={:08X} slot(r4)={:08X} [slot]={:08X}({}) r5={:08X} "
-                "lr={:08X}",
-                n, ctx.r3.u32, slot, head, has_head, ctx.r5.u32,
+                "[r3+16]={:08X} byte20={:02X}({}) lr={:08X}",
+                n, ctx.r3.u32, slot, head, has_head, ctx.r5.u32, r28v, b20, has_mgr,
                 static_cast<uint32_t>(ctx.lr));
   }
   __imp__sub_829EF010(ctx, base);
@@ -515,7 +529,19 @@ REX_HOOK_RAW(sub_82385378) {
     const uint32_t d = ctx.r3.u32;
     const uint32_t bkt = GuestLoad32(base, d + 4);
     const uint32_t cnt = reinterpret_cast<const uint8_t*>(base)[d + 140];
-    // r31 here is the CALLER's r31 = the manager object owning +968: match it against
+    // TEMP DIAG (1 boot): if the head is the corrupt node, null its link word so the
+    // callee takes the beq path instead of faulting. Answers whether ONE bad link blocks
+    // the boot (it proceeds) or the structure is systemically corrupt (next crash nearby).
+    // REMOVE after the verdict, whatever it is.
+    if (bkt == 0xF90CAA20u) {
+      uint32_t be0 = 0;
+      __builtin_memcpy(&be0, base + bkt + 4 + ((bkt >= 0xE0000000u) ? 0x1000u : 0u),
+                       sizeof(be0));
+      uint32_t zero = 0;
+      __builtin_memcpy(base + bkt + 4 + ((bkt >= 0xE0000000u) ? 0x1000u : 0u), &zero,
+                       sizeof(zero));
+      REXLOG_WARN("[dbg] PATCHED [F90CAA20+4]: {:08X} -> 0", be0);
+    }
     // OUT sub_82405188 lines to find its allocation site (fresh+uninit vs old+corrupted).
     // Plus: dump the deterministic corrupt node (allocated, hence committed) to see whether
     // only [0] is bad (targeted write) or the whole block is garbage (uninitialized).

@@ -36,6 +36,11 @@ std::atomic<bool> g_watch_done{false};
 // track and a stray step then escapes to the OS (exit 0x80000004); a counter balances.
 std::atomic<int> g_watch_stepping{0};
 void* g_watch_handle = nullptr;
+// Previous-hit stash for writer attribution (see above).
+uintptr_t g_prev_fault = 0;
+uintptr_t g_prev_pc = 0;
+uint32_t g_prev_lr = 0;
+int g_prev_hit = 0;
 
 constexpr DWORD kSingleStep = 0x80000004u;  // EXCEPTION_SINGLE_STEP
 
@@ -89,6 +94,17 @@ LONG CALLBACK WatchHandler(EXCEPTION_POINTERS* info) {
   // Always log touches to the node itself (small volume, decisive); other page
   // traffic stays silent.
   const bool on_node = (fault >= node && fault < node + 32);
+  // Stash this hit: if a LATER hit finds BAD, the writer is almost surely the faulting
+  // instruction of the immediately preceding hit (same thread burst), not the observer.
+  // Snapshot first: the log below must show the PREVIOUS hit, not this one.
+  const uintptr_t snapshot_fault = g_prev_fault;
+  const uintptr_t snapshot_pc = g_prev_pc;
+  const uint32_t snapshot_lr = g_prev_lr;
+  const int snapshot_hit = g_prev_hit;
+  g_prev_fault = fault;
+  g_prev_pc = pc;
+  g_prev_lr = guest_lr;
+  g_prev_hit = hit;
   const bool give_up = !found && hit >= kMaxWatchHits;
   if (found || give_up) {
     g_watch_done.store(true);
@@ -114,18 +130,31 @@ LONG CALLBACK WatchHandler(EXCEPTION_POINTERS* info) {
   if (found || on_node) {
     g_watch_logs.fetch_add(1);
     HMODULE module = nullptr;
+    HMODULE prev_module = nullptr;
     char path[MAX_PATH] = "?";
+    char prev_path[MAX_PATH] = "?";
     if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                                 GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                             reinterpret_cast<LPCSTR>(pc), &module) &&
         module) {
       GetModuleFileNameA(module, path, MAX_PATH);
     }
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            reinterpret_cast<LPCSTR>(g_prev_pc), &prev_module) &&
+        prev_module) {
+      GetModuleFileNameA(prev_module, prev_path, MAX_PATH);
+    }
     const char* name = std::strrchr(path, '\\');
+    const char* prev_name = std::strrchr(prev_path, '\\');
+    const bool has_prev = snapshot_hit > 0 && prev_module != nullptr;
     REXLOG_WARN("[watch] hit #{} fault={:08X} writer={}+0x{:X} guest_lr={:08X} "
-                "[node+0]={:08X} [node+4]={:08X}{}",
+                "[node+0]={:08X} [node+4]={:08X} prev=#{} {}+0x{:X} lr={:08X}{}",
                 hit, static_cast<uint32_t>(fault), name ? name + 1 : path,
-                pc - reinterpret_cast<uintptr_t>(module), guest_lr, raw0, raw1,
+                pc - reinterpret_cast<uintptr_t>(module), guest_lr, raw0, raw1, snapshot_hit,
+                has_prev ? (prev_name ? prev_name + 1 : prev_path) : "none",
+                has_prev ? snapshot_pc - reinterpret_cast<uintptr_t>(prev_module) : 0,
+                has_prev ? snapshot_lr : 0,
                 found ? "  <<< BAD VALUE WRITTEN" : "");
     rex::FlushLogging();
   }
